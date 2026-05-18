@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "887624824054",
+    "project_id": "carshop-b79bc",
+    "storage_bucket": "carshop-b79bc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:887624824054:android:b212e5f689b7f51b86a8d7",
+        "android_client_info": {
+          "package_name": "com.example.car_shop"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCyMfLxv7suRo9cOTj06AXMxy3mAs94zmU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
