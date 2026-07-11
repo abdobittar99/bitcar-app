@@ -17,7 +17,7 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.example.car_shop"
-    compileSdkVersion(35)
+    compileSdkVersion(36)
     ndkVersion = "27.0.12077973"
 
     compileOptions {
@@ -34,8 +34,8 @@ android {
         applicationId = "com.example.car_shop"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = 23
-        targetSdk = 33
+        minSdk = flutter.minSdkVersion
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true
