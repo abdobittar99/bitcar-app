@@ -8,7 +8,6 @@ import 'package:car_shop/shared/componants/general_widget/empty_stete_widget.dar
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-@override
 class FavoritesScreen extends StatefulWidget {
   const FavoritesScreen({super.key});
 
