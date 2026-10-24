@@ -9,8 +9,8 @@ import 'package:car_shop/entities/app_user.dart';
 import 'package:car_shop/modules/car/car_form/bloc/car_form_event.dart';
 import 'package:car_shop/modules/car/car_form/bloc/car_form_state.dart';
 import 'package:car_shop/entities/car.dart';
-import 'package:car_shop/modules/car/car_list/domain/usecases/add_car.dart';
-import 'package:car_shop/modules/car/car_list/domain/usecases/update_car_details.dart';
+import 'package:car_shop/modules/car/domain/usecases/add_car.dart';
+import 'package:car_shop/modules/car/domain/usecases/update_car_details.dart';
 import 'package:car_shop/modules/home/domain/usecases/get_current_user.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 

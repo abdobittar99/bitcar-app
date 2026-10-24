@@ -2,8 +2,8 @@ import 'package:car_shop/core/enums/car_form_mode.dart';
 import 'package:car_shop/modules/car/car_form/bloc/car_form_bloc.dart';
 import 'package:car_shop/modules/car/car_form/bloc/car_form_event.dart';
 import 'package:car_shop/modules/car/car_form/bloc/car_form_state.dart';
-import 'package:car_shop/shared/componants/general_widget/app_button.dart';
-import 'package:car_shop/shared/componants/general_widget/app_formfield.dart';
+import 'package:car_shop/shared/components/general_widget/app_button.dart';
+import 'package:car_shop/shared/components/general_widget/app_formfield.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 

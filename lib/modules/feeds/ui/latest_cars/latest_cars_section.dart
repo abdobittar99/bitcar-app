@@ -2,8 +2,8 @@ import 'package:car_shop/modules/feeds/bloc/feeds_bloc.dart';
 import 'package:car_shop/modules/feeds/bloc/feeds_state.dart';
 import 'package:car_shop/modules/home/bloc/home_bloc.dart';
 import 'package:car_shop/modules/home/bloc/home_event.dart';
-import 'package:car_shop/shared/componants/car_widget/small_horizontal_car_card.dart';
-import 'package:car_shop/shared/componants/general_widget/section_header.dart';
+import 'package:car_shop/shared/components/car_widget/small_horizontal_car_card.dart';
+import 'package:car_shop/shared/components/general_widget/section_header.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 

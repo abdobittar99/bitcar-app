@@ -1,4 +1,4 @@
-import 'package:car_shop/modules/car/car_list/data/datasource/cars_datasource.dart';
+import 'package:car_shop/modules/car/data/datasource/cars_datasource.dart';
 import 'package:car_shop/modules/favorite/data/datasources/favorite_remote_datasource.dart';
 import 'package:car_shop/modules/favorite/domain/models/favorite_page.dart';
 import 'package:car_shop/modules/favorite/domain/repositories/favorite_repository.dart';

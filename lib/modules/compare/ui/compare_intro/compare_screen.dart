@@ -6,9 +6,9 @@ import 'package:car_shop/modules/compare/bloc/state.dart';
 import 'package:car_shop/modules/compare/ui/compare_result/compare_result_screen.dart';
 import 'package:car_shop/modules/compare/ui/select_car/select_car_page.dart';
 import 'package:car_shop/modules/search/bloc/search_bloc.dart';
-import 'package:car_shop/shared/componants/compare_widget/car_slot_card.dart';
-import 'package:car_shop/shared/componants/general_widget/app_button.dart';
-import 'package:car_shop/shared/componants/general_widget/section_header.dart';
+import 'package:car_shop/shared/components/compare_widget/car_slot_card.dart';
+import 'package:car_shop/shared/components/general_widget/app_button.dart';
+import 'package:car_shop/shared/components/general_widget/section_header.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 

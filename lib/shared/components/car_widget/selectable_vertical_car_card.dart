@@ -1,5 +1,5 @@
 import 'package:car_shop/entities/car.dart';
-import 'package:car_shop/shared/componants/car_widget/car_conditional_badge.dart';
+import 'package:car_shop/shared/components/car_widget/car_conditional_badge.dart';
 import 'package:flutter/material.dart';
 
 class SelectableCarCardHorizontal extends StatelessWidget {

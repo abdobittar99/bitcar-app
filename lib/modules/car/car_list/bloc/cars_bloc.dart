@@ -3,12 +3,12 @@ import 'dart:async';
 import 'package:car_shop/core/errors/bloc/app_error_cubit.dart';
 import 'package:car_shop/core/errors/exeption.dart';
 import 'package:car_shop/entities/car.dart';
-import 'package:car_shop/modules/car/car_list/domain/usecases/delete_cars.dart';
-import 'package:car_shop/modules/car/car_list/domain/usecases/get_initial_cars.dart';
-import 'package:car_shop/modules/car/car_list/domain/usecases/update_car.dart';
+import 'package:car_shop/modules/car/domain/usecases/delete_cars.dart';
+import 'package:car_shop/modules/car/domain/usecases/get_initial_cars.dart';
+import 'package:car_shop/modules/car/domain/usecases/update_car.dart';
 import 'package:car_shop/modules/car/car_list/bloc/cars_event.dart';
 import 'package:car_shop/modules/car/car_list/bloc/cars_state.dart';
-import 'package:car_shop/modules/car/car_list/domain/usecases/load_more_cars.dart';
+import 'package:car_shop/modules/car/domain/usecases/load_more_cars.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 class CarsBloc extends Bloc<CarsEvent, CarsState> {

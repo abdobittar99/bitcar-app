@@ -8,9 +8,9 @@ import 'package:car_shop/modules/search/bloc/search_bloc.dart';
 import 'package:car_shop/modules/search/bloc/search_event.dart';
 import 'package:car_shop/modules/search/bloc/search_state.dart';
 import 'package:car_shop/modules/search/ui/filter/filter_button.dart';
-import 'package:car_shop/shared/componants/general_widget/app_button.dart';
-import 'package:car_shop/shared/componants/general_widget/app_formfield.dart';
-import 'package:car_shop/shared/componants/car_widget/selectable_vertical_car_card.dart';
+import 'package:car_shop/shared/components/general_widget/app_button.dart';
+import 'package:car_shop/shared/components/general_widget/app_formfield.dart';
+import 'package:car_shop/shared/components/car_widget/selectable_vertical_car_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 

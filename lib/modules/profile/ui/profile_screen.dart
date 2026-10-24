@@ -15,12 +15,12 @@ import 'package:car_shop/modules/home/bloc/home_bloc.dart';
 import 'package:car_shop/modules/profile/bloc/profile_bloc.dart';
 import 'package:car_shop/modules/profile/bloc/profile_event.dart';
 import 'package:car_shop/modules/profile/bloc/profile_state.dart';
-import 'package:car_shop/shared/componants/general_widget/app_button.dart';
-import 'package:car_shop/shared/componants/general_widget/section_header.dart';
-import 'package:car_shop/shared/componants/profile_widget/profile_item.dart';
-import 'package:car_shop/shared/componants/profile_widget/profile_card.dart';
-import 'package:car_shop/shared/componants/profile_widget/profile_header.dart';
-import 'package:car_shop/shared/componants/profile_widget/profile_info_titel.dart';
+import 'package:car_shop/shared/components/general_widget/app_button.dart';
+import 'package:car_shop/shared/components/general_widget/section_header.dart';
+import 'package:car_shop/shared/components/profile_widget/profile_item.dart';
+import 'package:car_shop/shared/components/profile_widget/profile_card.dart';
+import 'package:car_shop/shared/components/profile_widget/profile_header.dart';
+import 'package:car_shop/shared/components/profile_widget/profile_info_titel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 

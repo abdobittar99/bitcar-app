@@ -4,8 +4,8 @@ import 'package:car_shop/core/image_source/image_source.dart';
 import 'package:car_shop/modules/car/car_form/bloc/car_form_bloc.dart';
 import 'package:car_shop/modules/car/car_form/bloc/car_form_event.dart';
 import 'package:car_shop/modules/car/car_form/bloc/car_form_state.dart';
-import 'package:car_shop/shared/componants/general_widget/app_button.dart';
-import 'package:car_shop/shared/componants/general_widget/section_header.dart';
+import 'package:car_shop/shared/components/general_widget/app_button.dart';
+import 'package:car_shop/shared/components/general_widget/section_header.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 

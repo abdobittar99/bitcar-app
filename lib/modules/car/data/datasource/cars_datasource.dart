@@ -4,7 +4,7 @@ import 'package:car_shop/core/errors/mapper/error_mapper.dart';
 import 'package:car_shop/core/utils/image_diff.dart';
 import 'package:car_shop/core/utils/search_utils.dart';
 import 'package:car_shop/models/car_model.dart';
-import 'package:car_shop/modules/car/car_list/domain/model/cars_page.dart';
+import 'package:car_shop/modules/car/domain/model/cars_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 

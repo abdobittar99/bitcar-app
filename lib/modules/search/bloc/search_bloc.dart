@@ -1,7 +1,7 @@
 import 'package:car_shop/core/errors/bloc/app_error_cubit.dart';
 import 'package:car_shop/core/errors/exeption.dart';
 import 'package:car_shop/entities/car.dart';
-import 'package:car_shop/modules/car/car_list/domain/usecases/delete_cars.dart';
+import 'package:car_shop/modules/car/domain/usecases/delete_cars.dart';
 import 'package:car_shop/modules/search/bloc/search_event.dart';
 import 'package:car_shop/modules/search/bloc/search_state.dart';
 import 'package:car_shop/models/search_filters.dart';

@@ -2,7 +2,7 @@ import 'package:car_shop/core/errors/bloc/app_error_cubit.dart';
 import 'package:car_shop/core/errors/exeption.dart';
 import 'package:car_shop/modules/car/car_details/bloc/car_details_event.dart';
 import 'package:car_shop/modules/car/car_details/bloc/car_details_state.dart';
-import 'package:car_shop/modules/car/car_list/domain/usecases/get_car_details.dart';
+import 'package:car_shop/modules/car/domain/usecases/get_car_details.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 class CarDetailsBloc extends Bloc<CarDetailsEvent, CarDetailsState> {

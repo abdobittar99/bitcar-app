@@ -1,9 +1,9 @@
 import 'package:car_shop/core/utils/image_diff.dart';
 import 'package:car_shop/models/car_model.dart';
 import 'package:car_shop/entities/car.dart';
-import 'package:car_shop/modules/car/car_list/data/datasource/cars_datasource.dart';
-import 'package:car_shop/modules/car/car_list/domain/model/cars_page.dart';
-import 'package:car_shop/modules/car/car_list/domain/repositories/cars_repository.dart';
+import 'package:car_shop/modules/car/data/datasource/cars_datasource.dart';
+import 'package:car_shop/modules/car/domain/model/cars_page.dart';
+import 'package:car_shop/modules/car/domain/repositories/cars_repository.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class CarsRepositoryImpl implements CarsRepository {

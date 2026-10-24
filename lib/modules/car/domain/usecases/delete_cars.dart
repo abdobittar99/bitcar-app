@@ -1,4 +1,4 @@
-import 'package:car_shop/modules/car/car_list/domain/repositories/cars_repository.dart';
+import 'package:car_shop/modules/car/domain/repositories/cars_repository.dart';
 
 class DeleteCar {
   final CarsRepository repo;

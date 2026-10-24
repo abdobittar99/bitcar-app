@@ -8,7 +8,7 @@ import 'package:car_shop/modules/feeds/model/brand_item.dart';
 import 'package:car_shop/modules/feeds/ui/categories/filtered_cars_screen.dart';
 import 'package:car_shop/modules/search/bloc/search_bloc.dart';
 import 'package:car_shop/modules/search/bloc/search_event.dart';
-import 'package:car_shop/shared/componants/general_widget/section_header.dart';
+import 'package:car_shop/shared/components/general_widget/section_header.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 

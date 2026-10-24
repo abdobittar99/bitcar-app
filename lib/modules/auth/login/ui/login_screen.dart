@@ -4,11 +4,11 @@ import 'package:car_shop/modules/auth/login/bloc/login_event.dart';
 import 'package:car_shop/modules/auth/login/bloc/login_state.dart';
 import 'package:car_shop/modules/splash/bloc/splash_bloc.dart';
 import 'package:car_shop/modules/splash/bloc/splash_event.dart';
-import 'package:car_shop/shared/componants/general_widget/app_button.dart';
-import 'package:car_shop/shared/componants/general_widget/app_text_field.dart';
-import 'package:car_shop/shared/componants/auth_widget/auth_footer.dart';
-import 'package:car_shop/shared/componants/auth_widget/auth_header.dart';
-import 'package:car_shop/shared/componants/auth_widget/auth_card.dart';
+import 'package:car_shop/shared/components/general_widget/app_button.dart';
+import 'package:car_shop/shared/components/general_widget/app_text_field.dart';
+import 'package:car_shop/shared/components/auth_widget/auth_footer.dart';
+import 'package:car_shop/shared/components/auth_widget/auth_header.dart';
+import 'package:car_shop/shared/components/auth_widget/auth_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 

@@ -1,7 +1,7 @@
 import 'package:car_shop/core/errors/bloc/app_error_cubit.dart';
 import 'package:car_shop/core/errors/exeption.dart';
 import 'package:car_shop/entities/ad.dart';
-import 'package:car_shop/modules/car/car_list/domain/usecases/get_initial_cars.dart';
+import 'package:car_shop/modules/car/domain/usecases/get_initial_cars.dart';
 import 'package:car_shop/modules/feeds/bloc/feeds_event.dart';
 import 'package:car_shop/modules/feeds/bloc/feeds_state.dart';
 import 'package:car_shop/modules/feeds/domian/usecase/add_ad.dart';

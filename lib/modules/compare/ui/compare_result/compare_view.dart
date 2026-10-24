@@ -1,9 +1,9 @@
 import 'package:car_shop/entities/car.dart';
-import 'package:car_shop/shared/componants/compare_widget/comparison_weight.dart';
-import 'package:car_shop/shared/componants/compare_widget/compare_header.dart';
-import 'package:car_shop/shared/componants/compare_widget/compare_score.dart';
-import 'package:car_shop/shared/componants/compare_widget/compare_secthion.dart';
-import 'package:car_shop/shared/componants/compare_widget/compare_spec_row.dart';
+import 'package:car_shop/shared/components/compare_widget/comparison_weight.dart';
+import 'package:car_shop/shared/components/compare_widget/compare_header.dart';
+import 'package:car_shop/shared/components/compare_widget/compare_score.dart';
+import 'package:car_shop/shared/components/compare_widget/compare_secthion.dart';
+import 'package:car_shop/shared/components/compare_widget/compare_spec_row.dart';
 import 'package:flutter/material.dart';
 
 class CompareView extends StatelessWidget {

@@ -1,11 +1,11 @@
 import 'package:car_shop/models/search_filters.dart';
-import 'package:car_shop/shared/componants/general_widget/app_button.dart';
-import 'package:car_shop/shared/componants/general_widget/app_choise_chip.dart';
-import 'package:car_shop/shared/componants/general_widget/app_dropdown.dart';
-import 'package:car_shop/shared/componants/general_widget/app_formfield.dart';
-import 'package:car_shop/shared/componants/general_widget/color_selector.dart';
-import 'package:car_shop/shared/componants/general_widget/section_header.dart';
-import 'package:car_shop/shared/componants/general_widget/year_filter.dart';
+import 'package:car_shop/shared/components/general_widget/app_button.dart';
+import 'package:car_shop/shared/components/general_widget/app_choise_chip.dart';
+import 'package:car_shop/shared/components/general_widget/app_dropdown.dart';
+import 'package:car_shop/shared/components/general_widget/app_formfield.dart';
+import 'package:car_shop/shared/components/general_widget/color_selector.dart';
+import 'package:car_shop/shared/components/general_widget/section_header.dart';
+import 'package:car_shop/shared/components/general_widget/year_filter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
