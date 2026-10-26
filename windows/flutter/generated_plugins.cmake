@@ -3,7 +3,6 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
-  app_links
   cloud_firestore
   desktop_window
   file_selector_windows

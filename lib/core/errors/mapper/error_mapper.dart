@@ -1,5 +1,5 @@
 import 'package:car_shop/core/enums/error_type.dart';
-import 'package:car_shop/core/errors/exeption.dart';
+import 'package:car_shop/core/errors/exception.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/services.dart';
 

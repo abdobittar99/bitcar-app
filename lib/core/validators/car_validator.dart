@@ -1,4 +1,4 @@
-import 'package:car_shop/modules/car/car_form/bloc/car_form_state.dart';
+import 'package:car_shop/features/car/car_form/bloc/car_form_state.dart';
 
 class CarValidator {
   static String? validateDetails(CarFormState s) {

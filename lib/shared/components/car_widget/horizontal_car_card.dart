@@ -1,8 +1,8 @@
-import 'package:car_shop/modules/car/car_details/ui/car_details_screen.dart';
+import 'package:car_shop/features/car/car_details/ui/car_details_screen.dart';
 import 'package:car_shop/entities/car.dart';
-import 'package:car_shop/modules/favorite/bloc/favorite_bloc.dart';
-import 'package:car_shop/modules/favorite/bloc/favorite_event.dart';
-import 'package:car_shop/modules/favorite/bloc/favorite_state.dart';
+import 'package:car_shop/features/favorite/bloc/favorite_bloc.dart';
+import 'package:car_shop/features/favorite/bloc/favorite_event.dart';
+import 'package:car_shop/features/favorite/bloc/favorite_state.dart';
 import 'package:car_shop/shared/components/car_widget/car_conditional_badge.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
