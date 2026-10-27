@@ -150,8 +150,7 @@ flutter run
 lib/
 ├── core/
 ├── entities/
-├── models/
-├── modules/
+├── features/
 │   ├── auth/
 │   │   ├── data/
 │   │   │   ├── datasource/
@@ -167,7 +166,7 @@ lib/
 │   ├── car/
 │   │   ├── data/
 │   │   ├── domain/
-│   │   ├── car_list/
+│   │   ├── cars_list/
 │   │   │   ├── bloc/
 │   │   │   └── ui/
 │   │   ├── car_details/
@@ -180,12 +179,12 @@ lib/
 │   │       ├── bloc/
 │   │       └── ui/
 │   │
-│   └── ... other application modules
-│
+│   └── ... other application features
+├── models/
 ├── shared/
 │   ├── components/
 │   └── styles/
-├── services/
+├── app_root.dart
 └── main.dart
 ```
 
