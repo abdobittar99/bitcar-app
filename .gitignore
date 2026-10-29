@@ -46,3 +46,5 @@ app.*.map.json
 
 firebase_options.dart
 coverage/
+# Claude Code - local settings
+/.claude/settings.local.json
