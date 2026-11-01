@@ -33,6 +33,55 @@ messages; existing functionality must be preserved." (original request written i
   text, with lock-screen hiding following device settings. The owner approves adding the new
   dependency needed for device notifications.
 
+### Session 2026-10-30
+
+- Q: Can users open their previous conversations and read messages while offline, even after
+  restarting the app? → A: Yes, read-only: the list and previously loaded messages are shown;
+  sending requires a connection.
+- Q: When several messages arrive while the app is closed, one notification per message or one per
+  conversation? → A: One notification per conversation, replaced by the latest message and showing
+  the number of new messages.
+- Q: Should there be a limit on how many messages a user can send in a short time? → A: Yes, 20
+  messages per minute per user; beyond that, sending is refused with a "sending too fast, try again
+  shortly" message.
+- Q: When does the app ask for permission to send notifications? → A: On first use of chat: the
+  first time the user opens the conversations screen or sends their first message, whichever comes
+  first.
+- Q: Can a user turn off read receipts so the other participant does not know they read a message?
+  → A: No; read receipts are always on for everyone in this version.
+
+### Session 2026-10-31 (planning decisions affecting scope)
+
+- Decision → The project stays on the free Firebase plan, with no server-side functions. **Device
+  push notifications are deferred to a future phase**: User Story 4, FR-022 to FR-025a and SC-004
+  are out of scope for this version. Everything else, including live in-app delivery, the
+  conversations list, unread counts, the red dot and read receipts, stays in scope. The design must
+  allow notifications to be added later without redesigning the chat.
+- Decision → Participant names are stored as a snapshot when the conversation is created and are not
+  updated when a user later changes their name; the user id remains the identity. Other users'
+  private profile data (email, phone) stays private.
+
+### Session 2026-11-01 (owner addition)
+
+- Decision → **Message history is loaded in batches of 20.** Opening a conversation loads only the 20
+  most recent messages; scrolling to the top loads the next 20 older ones, until the oldest message is
+  reached. Batches must never duplicate or reorder messages, the user's scroll position must be kept
+  when older messages are added, only one older batch may load at a time, and loading, error and
+  "no older messages" states must be shown (FR-037 to FR-044, SC-011).
+- Review decision (option A) → Only the **20 most recent messages are kept live**; older messages
+  are loaded once each. Read state stays live for every loaded message; a deletion of a message
+  outside the 20 most recent appears the next time the conversation is opened (FR-044).
+- Review decision (F4) → A new message arriving while the user is reading older messages must not
+  move the screen; a "New messages" indicator is shown instead. Sending a message brings the user
+  to the newest message (FR-045, FR-046).
+- Review decision (F5) → Opening a conversation marks **all** its messages as read, including ones
+  not loaded on screen yet (FR-015).
+- Review decision (F6) → Remaining notification wording outside User Story 4 and FR-022 to FR-025a
+  is marked deferred.
+- Review decision (UI details) → Approved as proposed: long-press to delete own message; time and
+  day-separator format; accessibility labels and text scaling; inquiry text replaces any previous
+  draft; the keyboard never hides the newest message or the input (FR-047 to FR-051).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Starting or resuming a conversation from a car (Priority: P1)
@@ -94,6 +143,19 @@ the sender sees each message change to "read".
    a clear error is shown, its text is kept, and the user can retry without creating duplicates.
 5. **Given** an empty or whitespace-only input, **When** the user tries to send, **Then** nothing is
    sent.
+6. **Given** a conversation with 45 messages visible to the user, **When** they open it, **Then** only
+   the 20 most recent are loaded, with the newest visible at the bottom.
+7. **Given** that conversation is open, **When** the user scrolls to the top of the loaded messages,
+   **Then** a loading indicator appears at the top and the next 20 older messages are added above;
+   scrolling to the top again adds the remaining 5, and a "beginning of the conversation" indicator
+   replaces further loading.
+8. **Given** older messages are being added, **When** they appear, **Then** the message the user was
+   looking at stays at the same place on screen, every message appears exactly once, and all
+   messages stay in send-time order.
+9. **Given** an older batch is loading, **When** the user keeps scrolling at the top, **Then** no second
+   request starts and no batch is loaded twice.
+10. **Given** loading an older batch fails, **When** the failure is detected, **Then** the already loaded
+    messages stay visible, a clear error is shown, and a retry action at the top loads that same batch.
 
 ---
 
@@ -132,10 +194,14 @@ appears directly and no unread count is added.
 
 ---
 
-### User Story 4 - Notifications when outside the app (Priority: P2)
+### User Story 4 - Notifications when outside the app (Priority: P2) — DEFERRED
 
-When the app is in the background or closed, a user receives a device notification for each new
-message, showing the sender's name and a preview of the text. Tapping the notification opens that
+> **Deferred to a future phase (Session 2026-10-31).** Kept here as the agreed behavior for that phase;
+> not part of this version's acceptance.
+
+When the app is in the background or closed, a user receives a device notification for new messages,
+showing the sender's name and a preview of the text. Each conversation has at most one notification,
+updated with the latest message and the number of new messages. Tapping the notification opens that
 conversation.
 
 **Why this priority**: Notifications make replies timely, but the in-app chat is usable without them.
@@ -155,6 +221,9 @@ lands in the conversation with A, where the message is visible and marked read.
    notification is shown and all in-app chat behavior still works.
 5. **Given** the user has signed out on a device, **When** messages are sent to that account,
    **Then** that device shows no notifications for it.
+6. **Given** the recipient already has a notification for a conversation, **When** more messages
+   arrive in it, **Then** that same notification is updated to the latest message and shows the number
+   of new messages (e.g. "3 new messages") instead of adding new notifications.
 
 ---
 
@@ -195,13 +264,14 @@ messages in it. Signed-out users cannot use the feature at all.
 **Why this priority**: Messages are private; a leak would be a serious privacy failure.
 
 **Independent Test**: With three accounts (A, S, other user O, including an admin), create an A–S
-conversation; verify O never sees it and cannot read, send or delete anything in it, and receives no
-notifications for it.
+conversation; verify O never sees it and cannot read, send or delete anything in it. (Receiving no
+notifications for it is deferred with User Story 4.)
 
 **Acceptance Scenarios**:
 
 1. **Given** a conversation between A and S, **When** any other user, including an admin, uses the app,
-   **Then** that conversation, its messages and its notifications are never available to them.
+   **Then** that conversation and its messages are never available to them (and, once notifications
+   exist, its notifications; deferred).
 2. **Given** a non-participant, **When** they attempt to read, send or delete messages in that
    conversation, **Then** the system rejects the attempt, not only the UI.
 
@@ -219,14 +289,38 @@ notifications for it.
   placeholder name.
 - Connection is lost while the app is open: loaded messages stay visible, a clear connection error is
   shown, and missed messages, unread counts and the red dot catch up once the connection returns.
+- The app is opened with no connection: the conversations list and previously loaded messages are
+  shown from the device (FR-014b) with an offline indication; sending fails per FR-014.
 - Double tap or two devices trying to start the same conversation at once: only one conversation
   exists.
+- A user sends more than 20 messages within one minute (across all conversations): the extra messages
+  are refused per FR-014a, and sending works again once the rate drops below the limit.
 - A message exceeding the maximum length cannot be sent; long messages are shown fully wrapped.
-- A long history opens on the most recent messages; older ones stay reachable by scrolling.
+- A long history opens on the 20 most recent messages; older ones load 20 at a time by scrolling up
+  (FR-037 to FR-044).
+- A conversation has exactly 20, or a multiple of 20, messages: one last request finds no older
+  messages, and the "beginning of the conversation" indicator is shown without an error.
+- A new message arrives, or the user sends or deletes a message, while an older batch is loading: the
+  new or changed message appears once, in the right place, and the older batch is still added
+  correctly.
+- A message among the 20 most recent is deleted by its sender: it changes to the deletion placeholder
+  immediately. A deleted message outside the 20 most recent keeps its old text on the other
+  participant's open screen and shows the placeholder the next time the conversation is opened
+  (FR-027, FR-044).
+- The user is reading older messages when new messages arrive: the screen does not move, and a
+  "New messages" indicator appears; tapping it, or sending a message, brings the user to the newest
+  message (FR-045, FR-046).
+- A conversation has more than 20 unread messages: opening it marks all of them read, even those not
+  loaded on screen yet (FR-015).
+- No connection while scrolling up: older messages already kept on the device are shown; for the
+  rest, the offline indication is shown instead of the "beginning of the conversation" indicator,
+  and loading continues once the connection returns.
+- The user had deleted the conversation on their side (FR-027a): batches stop at the first message
+  after that deletion; earlier history is never loaded.
 - The same account is signed in on two devices: reading a conversation on one device clears its
   unread count on the other.
-- A message is deleted while the recipient has not read it yet: it no longer counts as unread, and any
-  notification already shown is not retracted.
+- A message is deleted while the recipient has not read it yet: it no longer counts as unread. (Any
+  notification already shown is not retracted; deferred with notifications.)
 - A user deletes a conversation that has unread messages: its unread count is cleared and it no
   longer contributes to the red dot.
 - The other participant deletes a message from a conversation the user had deleted on their side:
@@ -258,7 +352,8 @@ notifications for it.
   <brand> <model> (<year>). Is it still available?").
 - **FR-008**: The inquiry text MUST be editable and MUST NOT be sent without the user's explicit send
   action.
-- **FR-009**: When opened from the conversations list or a notification, the input MUST be empty.
+- **FR-009**: When opened from the conversations list, the input MUST be empty. (The same applies to
+  opening from a notification, deferred with User Story 4.)
 
 **Messaging**
 
@@ -270,11 +365,54 @@ notifications for it.
   every screen.
 - **FR-013**: Each message the user sends MUST show its state: sending, sent, read, or failed.
 - **FR-014**: A failed message MUST keep its text and offer retry; retrying MUST NOT create duplicates.
+- **FR-014a**: The system MUST refuse messages beyond 20 per minute per sending user, enforced by the
+  system and not only the UI; the refused message MUST be kept as failed with a plain-language
+  "You're sending messages too fast, try again shortly" error and can be retried later.
+- **FR-014b**: Without a connection, including after an app restart, the user MUST still be able to
+  open the conversations list and read previously loaded messages, with a visible offline
+  indication; sending, deleting and other changes require a connection. Data kept on the device MUST
+  belong only to the signed-in user and MUST NOT be shown after sign-out.
+
+**Message history loading (Session 2026-11-01)**
+
+- **FR-037**: Opening a conversation MUST load only the 20 most recent messages visible to the user
+  (all of them if there are fewer), showing the newest at the bottom.
+- **FR-038**: When the user scrolls to the top of the loaded messages, the system MUST load the next
+  20 older messages and show them above, repeating on each further scroll to the top until the
+  oldest message visible to the user (FR-027a) has been loaded.
+- **FR-039**: Every message MUST appear exactly once, whether it came from the first batch, an older
+  batch, live delivery, or the user's own sending or retrying.
+- **FR-040**: All loaded messages MUST be shown in send-time order (oldest to newest) across all
+  batches and live messages.
+- **FR-041**: Adding older messages MUST NOT move the content the user is looking at: the message at
+  the top of the screen before loading MUST stay at the same screen position after the older batch
+  is added.
+- **FR-042**: At most one older-messages request MAY run at a time per conversation screen; scrolling
+  to the top again while a batch is loading MUST NOT start another request or load the same batch
+  twice.
+- **FR-043**: The chat screen MUST show (a) a loading indicator at the top while an older batch
+  loads; (b) on failure, the already loaded messages, a plain-language error through the app's
+  existing error display (FR-031), and a retry action at the top that requests the same batch; (c)
+  once the oldest message is loaded, a "beginning of the conversation" indicator, with no further
+  requests. Without a connection, the screen MUST NOT claim the beginning was reached unless it is
+  known; it shows the offline indication (FR-014b) instead.
+- **FR-044**: While the conversation is open, the 20 most recent messages MUST stay live: new
+  messages, deletions (FR-027) and read-state changes appear without reloading. Read state (FR-015)
+  MUST stay live for every loaded message. Older messages are loaded once: a deletion of a message
+  outside the 20 most recent MUST appear at the latest the next time the conversation is opened.
+- **FR-045**: When a new message arrives while the user is viewing the newest messages, it MUST be
+  shown directly at the bottom. When the user has scrolled away from the newest messages, the
+  content they are looking at MUST NOT move; instead a "New messages" indicator MUST appear, and
+  tapping it MUST bring the user to the newest message.
+- **FR-046**: When the user sends a message (or retries a failed one), the screen MUST bring them to
+  the newest message.
 
 **Unread counts & read receipts**
 
-- **FR-015**: A received message MUST be counted as unread until the recipient views it in the open
-  conversation; it then MUST be marked read, and the sender MUST see it as "read".
+- **FR-015**: A received message MUST be counted as unread until the recipient opens the conversation.
+  Opening the conversation (and receiving messages while it is open on screen) MUST mark **all** its
+  messages read, including messages not loaded on screen yet, and the sender MUST see them as
+  "read". Read receipts are always on and cannot be turned off by users.
 - **FR-016**: Each conversation in the list MUST show the number of unread messages for the user; the
   count MUST clear when the user opens the conversation.
 - **FR-017**: The app bar conversations entry MUST show a red dot whenever at least one conversation
@@ -292,14 +430,20 @@ notifications for it.
 - **FR-021**: When a new message arrives and the user is elsewhere in the app, the red dot of FR-017
   MUST appear; no device notification is shown while the app is in the foreground.
 
-**Notifications**
+**Notifications — DEFERRED (Session 2026-10-31; not in this version's scope)**
 
 - **FR-022**: When the app is in the background or closed, the recipient MUST receive a device
-  notification per new message, showing the sender's name and a text preview.
+  notification for new messages, showing the sender's name and a text preview. There MUST be at most
+  one notification per conversation, replaced by the latest message and showing the number of new
+  messages since the user last opened that conversation.
 - **FR-023**: Tapping a notification MUST open the related conversation, after sign-in if required.
 - **FR-024**: Notifications MUST be sent only to devices where a participant is currently signed in;
   signing out MUST stop notifications for that account on that device.
 - **FR-025**: If notification permission is denied, all other chat behavior MUST still work.
+- **FR-025a**: The app MUST ask for notification permission only on the user's first use of chat:
+  the first time they open the conversations screen or send their first message, whichever comes
+  first. It MUST NOT ask at app launch or sign-in, and MUST NOT ask again on the same device after
+  the user has answered.
 
 **Conversations list & navigation**
 
@@ -322,10 +466,27 @@ notifications for it.
 - **FR-031**: Connection, sending and deletion errors MUST be shown through the app's existing error
   display, in plain language.
 
+**Chat screen details (Session 2026-11-01)**
+
+- **FR-047**: Deleting a message (FR-027) MUST be started by a long press on one of the user's own
+  messages, which offers a "Delete" option, followed by a confirmation dialog. A long press on the
+  other participant's message MUST NOT offer deletion.
+- **FR-048**: Each message MUST show its send time as hour and minutes (e.g. "3:45 PM"). Messages
+  from different days MUST be separated by a day label: "Today", "Yesterday", or the date. In the
+  conversations list, the latest message time MUST show the hour and minutes for today and the date
+  for earlier days.
+- **FR-049**: Message status icons (sending, sent, read, failed), the app bar red dot, and the
+  loading / retry / "beginning of the conversation" row MUST have spoken labels for screen readers,
+  and chat text MUST follow the device's text-size setting without being cut off.
+- **FR-050**: When the chat is opened from a car's details page, the inquiry text for that car MUST
+  replace any text previously in the message input.
+- **FR-051**: When the keyboard opens, the newest message MUST stay visible and the keyboard MUST NOT
+  cover the message input.
+
 **Security & privacy**
 
 - **FR-032**: Only a conversation's two participants MUST be able to see it, read, send or delete
-  messages in it, or receive its notifications; this MUST be enforced by the system, not only by
+  messages in it (or, once notifications exist, receive its notifications; deferred); this MUST be enforced by the system, not only by
   the UI. Admins have no special access to other users' conversations.
 - **FR-033**: Only signed-in users MUST be able to use any part of the feature.
 - **FR-034**: A message's sender MUST be the signed-in user who sent it and MUST NOT be alterable by
@@ -346,7 +507,7 @@ notifications for it.
 - **Message**: One text in a conversation. Attributes: conversation, sender, text, send time, state
   (sending / sent / read / failed as seen by the sender), deleted status.
 - **Participant**: An existing BitCar user (name, role) in a conversation; any role may participate.
-- **Notification registration**: The link between a signed-in user and a device that may receive
+- **Notification registration** *(deferred with notifications)*: The link between a signed-in user and a device that may receive
   their chat notifications; removed on sign-out.
 - **Car (existing)**: Supplies the owner identity and the brand, model and year for the inquiry text.
 
@@ -360,7 +521,7 @@ notifications for it.
   different devices, lead to the same single conversation.
 - **SC-003**: Under normal connectivity, a new message reaches the recipient's open app (conversation,
   list update or red dot) within 3 seconds in 95% of cases.
-- **SC-004**: Under normal connectivity, a recipient whose app is in the background or closed receives
+- **SC-004** *(deferred with notifications)*: Under normal connectivity, a recipient whose app is in the background or closed receives
   the notification within 10 seconds in 95% of cases.
 - **SC-005**: The sender sees "read" within 3 seconds of the recipient viewing the message in 95% of
   cases.
@@ -368,24 +529,28 @@ notifications for it.
   normal connectivity.
 - **SC-007**: Unread counts and the red dot are correct (no stale or missing indicators) in 100% of
   tested scenarios.
-- **SC-008**: 0 cases where a non-participant can read, send or delete messages, or receive
-  notifications, for a conversation during security testing.
+- **SC-008**: 0 cases where a non-participant can read, send or delete messages for a conversation
+  during security testing (receiving its notifications: deferred with notifications).
 - **SC-009**: 100% of failed messages keep their text and can be resent once connectivity returns.
 - **SC-010**: All existing app flows covered by regression testing behave as before the feature.
+- **SC-011**: Under normal connectivity, each older batch of 20 messages appears within 2 seconds of
+  reaching the top in 95% of cases, and in 100% of tested scenarios (long histories, exact multiples
+  of 20, messages arriving or deleted during loading, rapid repeated scrolling) messages are never
+  duplicated, missing or out of order and the visible message does not jump.
 
 ## Assumptions
 
-- Messages are text only; images, attachments, voice notes, message editing, blocking and reporting
-  are out of scope for this version.
+- Messages are text only; images, attachments, voice notes, message editing, blocking, reporting and
+  a setting to turn off read receipts are out of scope for this version.
 - Deleting a conversation only affects the deleting user's side (FR-027a); there is no way to delete
   a conversation for both participants.
-- The project owner has approved adding the new dependency required for device notifications
-  (constitution: new packages need owner approval).
+- *(Deferred with notifications)* The project owner approved adding the dependency needed for device
+  notifications; it is not used in this version, which adds no new package.
 - Within a conversation, "buyer" means the user who started it and "seller" the car owner; no new
   roles are introduced and admins participate as ordinary users.
 - The inquiry text is a fixed English template, matching the app's current English UI.
-- Notifications show the message preview; privacy-hiding of previews on the lock screen follows the
-  device's own settings.
+- *(Deferred with notifications)* Notifications show the message preview; privacy-hiding of previews
+  on the lock screen follows the device's own settings.
 - Conversations and non-deleted messages are kept indefinitely.
 - The existing sign-in system is reused; no separate chat account is needed.
 - Users normally have internet connectivity; offline sending beyond failed/retry (FR-014) is not
