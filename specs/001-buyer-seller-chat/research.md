@@ -164,6 +164,30 @@ All findings below were checked against the current code in this repository, not
   - **JDK (owner decision 2026-10-31)**: JDK 21 is installed **next to** JDK 17. Only the emulator command uses it, by
     setting `JAVA_HOME` and `PATH` for that terminal session (see quickstart). Flutter and Gradle keep their current JDK
     configuration; nothing global is changed.
+  - **Pinned versions (B1, 2026-11-02)**: `@firebase/rules-unit-testing` 5.0.2 + `firebase` 12.19.0 (peer `^12`,
+    Node ≥ 20). 6.0.0 was not used because it requires Node ≥ 24.12 (local Node is 20.20).
+  - **Known `npm audit` findings, accepted for the local test environment (owner decision 2026-11-02, option A)**:
+
+    | Advisory | CVSS | Affected / patched | Scope |
+    |---|---|---|---|
+    | GHSA-m9gg-hp2v-232j (CVE-2026-101916) | 7.4 | `@grpc/grpc-js` < 1.13.6 and 1.14.0–1.14.4 / fixed in 1.13.6, 1.14.5 | **gRPC servers** only: `getAuthContext` when server credentials use `requireClientCertificate: false` |
+    | GHSA-f596-whhp-79r4 (CVE-2026-101915) | 3.7 | same ranges / same fixes | **gRPC servers** only: a crashing method handler's error message is sent to the client |
+
+    - Installed: one copy, `@grpc/grpc-js@1.9.16`, pulled in by `firebase@12.19.0` → `@firebase/firestore@4.17.2`
+      (`"~1.9.0"`), also via `@firebase/firestore-compat`. `npm audit` reports "5 high" because it counts the same two
+      advisories on every dependent (`@grpc/grpc-js`, `@firebase/firestore`, `@firebase/firestore-compat`, `firebase`,
+      `@firebase/rules-unit-testing`).
+    - Why it does not apply: these are **development dependencies** in `firestore_tests/` only, never part of the
+      Flutter app or any deployment. The Firestore SDK uses `@grpc/grpc-js` as a **client** to reach the local Firestore
+      emulator (`127.0.0.1:8080`, project `demo-bitcar`); nothing in this project runs a gRPC server with it.
+    - Why it is not fixed now: the patched versions (≥ 1.13.6) are **outside the range the Firestore SDK declares**
+      (`~1.9.0`, still the same in the latest `@firebase/firestore` 4.19.0 / `firebase` 13.1.0), and 1.9.16 is the last
+      1.9.x release. `npm audit fix --force` would downgrade to `firebase` 9.14.0 and is not used; `npm overrides` are
+      not used either (an untested SDK/grpc combination for no security gain here). `package.json` and
+      `package-lock.json` are unchanged.
+    - **Re-evaluate** whenever the Firebase JS SDK (`firebase`, `@firebase/rules-unit-testing`) or Node is updated:
+      run `npm ls @grpc/grpc-js` and `npm audit` inside `firestore_tests/`, and check whether the SDK's declared range
+      now includes a patched `@grpc/grpc-js`.
 
 ### D14. Participant names via `publicProfiles` (approved 2026-10-31, rev. 3)
 

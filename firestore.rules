@@ -1,11 +1,305 @@
 rules_version = '2';
+
+// BitCar Firestore Security Rules.
+// Contract: specs/001-buyer-seller-chat/contracts/firestore-security-rules.md
+// Tested by firestore_tests/ on the emulator (project demo-bitcar). There is no server code on the Spark plan,
+// so these rules are the only server-side enforcement. There is intentionally no catch-all rule.
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if true;
+
+    // ---------- helpers ----------
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function userPath(u) {
+      return /databases/$(database)/documents/users/$(u);
+    }
+
+    function profilePath(u) {
+      return /databases/$(database)/documents/publicProfiles/$(u);
+    }
+
+    function convPath(cid) {
+      return /databases/$(database)/documents/conversations/$(cid);
+    }
+
+    function msgPath(cid, mid) {
+      return /databases/$(database)/documents/conversations/$(cid)/messages/$(mid);
+    }
+
+    function rateLimitPath(u) {
+      return /databases/$(database)/documents/chatRateLimits/$(u);
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(userPath(uid()))
+        && get(userPath(uid())).data.role == 'admin';
+    }
+
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function validText(t) {
+      return t is string && t.trim().size() >= 1 && t.size() <= 1000;
+    }
+
+    function placeholderName() {
+      return 'BitCar user';
+    }
+
+    // Name a conversation must store for user u: their public name, or the fixed placeholder if they have none.
+    function expectedName(u) {
+      return exists(profilePath(u)) ? get(profilePath(u)).data.displayName : placeholderName();
+    }
+
+    // The participant of a two-person list who is not the caller.
+    function otherOf(p) {
+      return p[0] == uid() ? p[1] : p[0];
+    }
+
+    // ---------- users (audit E1–E5, fixes S1/S2) ----------
+
+    match /users/{userId} {
+      allow get: if signedIn() && uid() == userId;
+      allow list: if false;
+      allow create: if signedIn() && uid() == userId
+        && request.resource.data.keys().hasOnly(['id', 'fullName', 'email', 'phone', 'role'])
+        && request.resource.data.id == userId
+        && request.resource.data.role in ['buyer', 'seller'];
+      allow update: if signedIn() && uid() == userId
+        && request.resource.data.keys().hasOnly(['id', 'fullName', 'email', 'phone', 'role'])
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.role == resource.data.role;
+      allow delete: if false;
+
+      match /favorites/{carId} {
+        allow read, write: if signedIn() && uid() == userId;
+      }
+    }
+
+    // ---------- cars (E7–E11) ----------
+
+    match /cars/{carId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.sellerId == uid();
+      allow update: if signedIn()
+        && (resource.data.sellerId == uid() || isAdmin())
+        && request.resource.data.sellerId == resource.data.sellerId;
+      allow delete: if signedIn() && (resource.data.sellerId == uid() || isAdmin());
+    }
+
+    // ---------- ads (E12–E13) ----------
+
+    match /ads/{adId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ---------- publicProfiles (R16–R20, research D14) ----------
+
+    match /publicProfiles/{userId} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create, update: if signedIn() && uid() == userId
+        && request.resource.data.keys().hasOnly(['displayName'])
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.trim().size() >= 1
+        && request.resource.data.displayName.size() <= 100
+        && request.resource.data.displayName == getAfter(userPath(userId)).data.fullName;
+      allow delete: if false;
+    }
+
+    // ---------- chatRateLimits (FR-014a, research D10) ----------
+
+    match /chatRateLimits/{userId} {
+      allow get: if signedIn() && uid() == userId;
+      allow list: if false;
+      allow create: if signedIn() && uid() == userId
+        && request.resource.data.keys().hasOnly(['count', 'windowStart'])
+        && request.resource.data.count == 1
+        && request.resource.data.windowStart == request.time;
+      allow update: if signedIn() && uid() == userId
+        && request.resource.data.keys().hasOnly(['count', 'windowStart'])
+        && (
+          (resource.data.windowStart + duration.value(60, 's') <= request.time
+            && request.resource.data.count == 1
+            && request.resource.data.windowStart == request.time)
+          || (request.resource.data.windowStart == resource.data.windowStart
+            && request.resource.data.count == resource.data.count + 1
+            && request.resource.data.count <= 20)
+        );
+      allow delete: if false;
+    }
+
+    // A message is only valid together with exactly one counted send in the caller's rate-limit doc.
+    function rateLimitCounted() {
+      let after = getAfter(rateLimitPath(uid())).data;
+      return exists(rateLimitPath(uid()))
+        ? (after.windowStart == request.time
+            || after.count == get(rateLimitPath(uid())).data.count + 1)
+        : after.count == 1;
+    }
+
+    // ---------- conversations (FR-001, FR-015, FR-027, FR-027a, FR-032–FR-034) ----------
+
+    function validConversationCreate(cid) {
+      let d = request.resource.data;
+      let p = d.participants;
+      let names = d.participantNames;
+      let msg = getAfter(msgPath(cid, d.lastMessage.id)).data;
+      return signedIn()
+        && d.keys().hasOnly(['participants', 'buyerId', 'sellerId', 'participantNames', 'createdAt',
+                             'lastMessage', 'lastMessageAt', 'unreadCount'])
+        && d.keys().hasAll(['participants', 'buyerId', 'sellerId', 'participantNames', 'createdAt',
+                            'lastMessage', 'lastMessageAt', 'unreadCount'])
+        && p is list && p.size() == 2 && p[0] < p[1] && uid() in p
+        && cid == p[0] + '_' + p[1]
+        && d.buyerId == uid()
+        && d.sellerId == otherOf(p)
+        && d.createdAt == request.time
+        && d.lastMessageAt == request.time
+        && names.keys().hasOnly(p) && names.size() == 2
+        && names[p[0]] == expectedName(p[0])
+        && names[p[1]] == expectedName(p[1])
+        && d.unreadCount.keys().hasOnly(p)
+        && d.unreadCount[otherOf(p)] == 1
+        && d.unreadCount.get(uid(), 0) == 0
+        && d.lastMessage.keys().hasOnly(['id', 'text', 'senderId', 'deleted'])
+        && d.lastMessage.senderId == uid()
+        && d.lastMessage.deleted == false
+        && msg.senderId == uid()
+        && msg.text == d.lastMessage.text;
+    }
+
+    // New message: preview, time and the other participant's unread count move together with a new message doc.
+    function isSendUpdate(cid) {
+      let d = request.resource.data;
+      let p = resource.data.participants;
+      let mid = d.lastMessage.id;
+      let oldUnread = resource.data.get('unreadCount', {});
+      return changedKeys().hasOnly(['lastMessage', 'lastMessageAt', 'unreadCount'])
+        && d.lastMessageAt == request.time
+        && d.lastMessage.keys().hasOnly(['id', 'text', 'senderId', 'deleted'])
+        && d.lastMessage.senderId == uid()
+        && d.lastMessage.deleted == false
+        && !exists(msgPath(cid, mid))
+        && existsAfter(msgPath(cid, mid))
+        && getAfter(msgPath(cid, mid)).data.text == d.lastMessage.text
+        && d.unreadCount.keys().hasOnly(p)
+        && d.unreadCount.get(otherOf(p), 0) == oldUnread.get(otherOf(p), 0) + 1
+        && d.unreadCount.get(uid(), 0) == oldUnread.get(uid(), 0);
+    }
+
+    // Own unread to 0 and own lastReadAt to now; the other participant's entries unchanged.
+    function isMarkRead() {
+      let d = request.resource.data;
+      let p = resource.data.participants;
+      let oldUnread = resource.data.get('unreadCount', {});
+      let oldRead = resource.data.get('lastReadAt', {});
+      return changedKeys().hasOnly(['unreadCount', 'lastReadAt'])
+        && d.unreadCount.keys().hasOnly(p)
+        && d.unreadCount.get(uid(), 0) == 0
+        && d.unreadCount.get(otherOf(p), 0) == oldUnread.get(otherOf(p), 0)
+        && d.lastReadAt.keys().hasOnly(p)
+        && d.lastReadAt[uid()] == request.time
+        && d.lastReadAt.get(otherOf(p), null) == oldRead.get(otherOf(p), null);
+    }
+
+    // Delete for everyone: the preview may only turn into the placeholder of the caller's own message,
+    // and the other participant's unread count may drop by at most one.
+    function isDeleteMessageUpdate(cid) {
+      let d = request.resource.data;
+      let p = resource.data.participants;
+      let oldUnread = resource.data.get('unreadCount', {});
+      let newOther = d.unreadCount.get(otherOf(p), 0);
+      let oldOther = oldUnread.get(otherOf(p), 0);
+      return changedKeys().hasOnly(['lastMessage', 'unreadCount'])
+        && d.unreadCount.keys().hasOnly(p)
+        && d.unreadCount.get(uid(), 0) == oldUnread.get(uid(), 0)
+        && (newOther == oldOther || (newOther == oldOther - 1 && newOther >= 0))
+        && (d.lastMessage == resource.data.lastMessage
+          || (resource.data.lastMessage.senderId == uid()
+            && d.lastMessage.keys().hasOnly(['id', 'text', 'senderId', 'deleted'])
+            && d.lastMessage.id == resource.data.lastMessage.id
+            && d.lastMessage.senderId == uid()
+            && d.lastMessage.deleted == true
+            && d.lastMessage.text == ''
+            && getAfter(msgPath(cid, d.lastMessage.id)).data.deleted == true));
+    }
+
+    // One-sided delete (FR-027a): own clearedAt to now and own unread to 0.
+    function isClear() {
+      let d = request.resource.data;
+      let p = resource.data.participants;
+      let oldUnread = resource.data.get('unreadCount', {});
+      let oldCleared = resource.data.get('clearedAt', {});
+      return changedKeys().hasOnly(['clearedAt', 'unreadCount'])
+        && d.clearedAt.keys().hasOnly(p)
+        && d.clearedAt[uid()] == request.time
+        && d.clearedAt.get(otherOf(p), null) == oldCleared.get(otherOf(p), null)
+        && d.unreadCount.keys().hasOnly(p)
+        && d.unreadCount.get(uid(), 0) == 0
+        && d.unreadCount.get(otherOf(p), 0) == oldUnread.get(otherOf(p), 0);
+    }
+
+    // Replace only the caller's own placeholder name, only with the caller's own public name.
+    function isFillOwnName() {
+      let names = request.resource.data.participantNames;
+      let oldNames = resource.data.participantNames;
+      return changedKeys().hasOnly(['participantNames'])
+        && names.diff(oldNames).affectedKeys().hasOnly([uid()])
+        && oldNames[uid()] == placeholderName()
+        && exists(profilePath(uid()))
+        && names[uid()] == get(profilePath(uid())).data.displayName;
+    }
+
+    // Message create: caller is a participant after the write, the conversation preview points to this message,
+    // and the send is counted in the caller's rate-limit doc.
+    function validMessageCreate(cid, mid) {
+      let d = request.resource.data;
+      let conv = getAfter(convPath(cid)).data;
+      return signedIn()
+        && uid() in conv.participants
+        && conv.lastMessage.id == mid
+        && d.keys().hasOnly(['senderId', 'text', 'createdAt', 'deleted'])
+        && d.keys().hasAll(['senderId', 'text', 'createdAt', 'deleted'])
+        && d.senderId == uid()
+        && validText(d.text)
+        && d.deleted == false
+        && d.createdAt == request.time
+        && rateLimitCounted();
+    }
+
+    match /conversations/{cid} {
+      // A missing conversation may be checked by a user whose uid is part of the id (opening a new chat).
+      allow get: if signedIn()
+        && (resource == null ? uid() in cid.split('_') : uid() in resource.data.participants);
+      allow list: if signedIn() && uid() in resource.data.participants;
+      allow create: if validConversationCreate(cid);
+      allow update: if signedIn() && uid() in resource.data.participants
+        && (isSendUpdate(cid) || isMarkRead() || isDeleteMessageUpdate(cid) || isClear() || isFillOwnName());
+      allow delete: if false;
+
+      match /messages/{mid} {
+        allow get, list: if signedIn() && uid() in get(convPath(cid)).data.participants;
+        allow create: if validMessageCreate(cid, mid);
+        allow update: if signedIn()
+          && uid() in get(convPath(cid)).data.participants
+          && resource.data.senderId == uid()
+          && resource.data.deleted == false
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deleted', 'text'])
+          && request.resource.data.deleted == true
+          && request.resource.data.text == '';
+        allow delete: if false;
+      }
     }
   }
 }
-
-
-

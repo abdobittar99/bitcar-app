@@ -41,10 +41,16 @@ flutter test                               # whole suite (constitution gate): ch
 **Firebase Emulator Terminal (JDK 21, session only):**
 
 ```powershell
-npm --prefix firestore_tests install       # once
+Push-Location firestore_tests; npm install; Pop-Location   # once (npm --prefix ... install fails on npm 10)
 firebase emulators:exec --only firestore --project demo-bitcar "npm --prefix firestore_tests test"
 ```
 
+- **Expected `npm audit` output in `firestore_tests/`**: "5 high severity vulnerabilities". They are two advisories
+  in `@grpc/grpc-js@1.9.16` (GHSA-m9gg-hp2v-232j, GHSA-f596-whhp-79r4) counted on each dependent package. Both affect
+  **gRPC servers** only; here the package is a **development dependency** used as a **client** to the local Firestore
+  emulator, so they do not apply. The fixed versions are outside the range the Firestore SDK allows (`~1.9.0`).
+  **Do not** run `npm audit fix --force` (it downgrades `firebase` to 9.x) and do not add `overrides`. Re-check after
+  any Firebase JS SDK update (details: research D13).
 - The rules suite runs fully offline against the emulator with the `demo-bitcar` demo project, so it cannot read or
   write the real `carshop-b79bc` project.
 - It tests the project's real root `firestore.rules` (loaded by `firestore_tests/helpers.js`; no copy), and
@@ -64,6 +70,28 @@ firebase deploy --only firestore:rules,firestore:indexes
   Spark.
 - The CLI may offer to delete indexes missing from the root `firestore.indexes.json` (the existing `cars` indexes are in
   `project-root/firestore.indexes.json`). **Answer No.**
+
+### Early rollout after batches B2 and B4 (owner decision 2026-11-02)
+
+Every step that touches `carshop-b79bc` needs the owner's explicit approval **at that moment**.
+
+1. Indexes only: `firebase deploy --only firestore:indexes`; wait until the `conversations` index shows **Enabled**
+   in the Firebase console (Firestore → Indexes).
+2. Review the rules diff and the green rules suite (B2) and the existing-feature regression (B4).
+3. Back up the currently deployed rules (Firebase console → Firestore → Rules → copy into a dated local file outside
+   `lib/`), so they can be restored.
+4. Rules only: `firebase deploy --only firestore:rules`.
+5. On the **real phone**: re-test sign-in, cars, favorites, search and profile before starting B6.
+
+T087 still runs at the end to deploy the final versions.
+
+### Test devices and data
+
+- B4 regression and all sign-out checks run on the owner's real Android phone. Two-account chat scenarios use two
+  real devices when possible, otherwise the phone plus an Android Emulator.
+- Use dedicated test accounts only; never real users' conversations or data.
+- Q19/Q22 histories (45, 40 and 100 messages) are created **from the app** with the test accounts, respecting the
+  20 messages/minute limit (send in bursts of at most 20 per minute; 100 messages take about 5 minutes).
 
 ## Performance baseline probe (before measuring SC-003, SC-005, SC-006, SC-011)
 
@@ -120,10 +148,10 @@ $sorted = $runs.Ms | Sort-Object
 | Q20 | While reading in the middle, reach the top; note the top visible message | It stays at the same screen position after the batch is added; no message appears twice; order by time | FR-039–FR-041, SC-011 |
 | Q21 | Fling repeatedly at the top during loading; meanwhile S sends a message, deletes one of the newest 20 and one older message | One request per batch; while A is scrolled up the screen does not move and a "New messages" chip appears; the new message appears once; the deleted recent message turns into the placeholder at once; the deleted older message shows the placeholder after A reopens the chat; A's older own messages still turn "read" live | FR-039, FR-042, FR-044, FR-045 |
 | Q21a | A scrolled up; A sends a message. Then S sends 25 messages while A's chat is closed; A opens it | Sending jumps to the newest message. On opening, only 20 are loaded but the unread badge clears and S sees all 25 as read | FR-046, FR-015 |
-| Q22 | Conversation with exactly 40 messages; then airplane mode in a 100-message conversation and scroll up | 40: one extra empty request ends with the "beginning" label, no error. Offline: cached messages shown, offline banner, no "beginning" label; reconnect → loading continues. Force a failure (e.g. emulator stopped) → loaded messages kept, error snackbar, Retry loads the same batch | FR-043, edge cases |
+| Q22 | Conversation with exactly 40 messages; then airplane mode in a 100-message conversation and scroll up | 40: one extra empty request ends with the "beginning" label, no error. Offline: cached messages shown, offline banner, no "beginning" label; reconnect → loading continues. Older-batch failure + Retry is covered by unit tests (T046), not run manually | FR-043, edge cases |
 | Q23 | **Real Android device** (not only an emulator): sign in as A; open the conversations list, two chats (scroll older batches), favorites and profile; sign out; sign in as O on the same device; repeat with airplane mode on before signing in as O | O never sees A's conversations, messages, favorites or profile, online or offline; no `permission-denied` snackbar during sign-out; Firestore works normally for O after sign-in (new instance after `terminate`) | FR-014b, FR-053, research D18 |
 | Q24 | Airplane mode; A toggles a favorite (queued write); A taps Logout | Warning dialog; **Cancel** keeps A signed in and the favorite syncs after reconnect; **Log out** signs out and the change is discarded. With no pending writes, Logout signs out directly | FR-052 |
 | Q25 | Kill the app during sign-out (after "Signing out…" appears); reopen | Sign-out completes and data is removed before any screen with user data appears; the login screen is shown | FR-053 |
-| Q26 | Emulator: A has the chat open; stop the Firestore emulator until the messages stream fails, then start it again and tap **Retry**. Separately (rules test data): remove A's access to the conversation while it is open | Retryable failure: loaded messages stay, error banner with **Retry** (one automatic retry first); after Retry live updates resume, no message appears twice, only one listener is active. Access removed: messages stay visible, error shown **without** Retry | FR-054, research D17 |
+| Q26 | **Not run manually** (owner decision 2026-11-02): the app is not connected to the Firestore emulator in this phase, so the "stop the emulator, then Retry" check and access-removal check cannot be done by hand | Covered by unit tests: `chat_bloc_test.dart` group `stream errors` (T045): loaded messages kept, one automatic retry after 3 s, Retry re-subscribes once without duplicates, `permission` errors shown without Retry | FR-054, research D17 |
 
 Notification scenarios (former Q10–Q15) are deferred with User Story 4.
