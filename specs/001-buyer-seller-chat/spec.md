@@ -82,6 +82,19 @@ messages; existing functionality must be preserved." (original request written i
   day-separator format; accessibility labels and text scaling; inquiry text replaces any previous
   draft; the keyboard never hides the newest message or the input (FR-047 to FR-051).
 
+### Session 2026-11-02 (analysis review)
+
+- Decision → Data kept on the device for offline reading stays enabled; on sign-out it is fully
+  removed before anyone can use the app again, so a next user on the same device never sees the
+  previous user's data, online or offline (FR-014b unchanged).
+- Decision → If some changes have not been saved to the server yet when the user signs out, the
+  app warns them; they can cancel and stay signed in, or confirm and lose those changes (FR-052).
+- Review decision (chat-review CHK004/CHK005) → Deleted messages count toward the 20 loaded messages;
+  the user's own sending/failed messages are shown in addition and never affect the limit or where
+  older batches start (FR-037).
+- Review decision (chat-review CHK022) → A failed live chat update keeps loaded messages and offers
+  Retry when retrying can help; access errors are shown without Retry (FR-054).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Starting or resuming a conversation from a car (Priority: P1)
@@ -319,6 +332,14 @@ notifications for it is deferred with User Story 4.)
   after that deletion; earlier history is never loaded.
 - The same account is signed in on two devices: reading a conversation on one device clears its
   unread count on the other.
+- A user signs out while offline with unsaved changes: they are warned and may cancel (FR-052). After
+  sign-out, a second user signing in on the same device, even offline, sees none of the first
+  user's conversations, messages or other data (FR-014b, FR-053).
+- Live updates of an open conversation fail: loaded messages stay; a fixable failure offers Retry
+  after one automatic attempt, and retrying never shows a message twice; losing access to the
+  conversation shows the error without Retry (FR-054).
+- The app is closed in the middle of signing out: on the next start, sign-out is completed and the
+  device data removed before anything is shown (FR-053).
 - A message is deleted while the recipient has not read it yet: it no longer counts as unread. (Any
   notification already shown is not retracted; deferred with notifications.)
 - A user deletes a conversation that has unread messages: its unread count is cleared and it no
@@ -376,7 +397,11 @@ notifications for it is deferred with User Story 4.)
 **Message history loading (Session 2026-11-01)**
 
 - **FR-037**: Opening a conversation MUST load only the 20 most recent messages visible to the user
-  (all of them if there are fewer), showing the newest at the bottom.
+  (all of them if there are fewer), showing the newest at the bottom. Deleted messages, shown with
+  the "This message was deleted" placeholder, count toward these 20. The user's own messages that
+  are still sending or have failed exist only on the device: they are shown in addition to the 20,
+  do not count toward the limit, never decide where the next older batch starts, and once a send
+  succeeds the device copy and the saved message MUST appear as one message, never two.
 - **FR-038**: When the user scrolls to the top of the loaded messages, the system MUST load the next
   20 older messages and show them above, repeating on each further scroll to the top until the
   oldest message visible to the user (FR-027a) has been loaded.
@@ -406,6 +431,13 @@ notifications for it is deferred with User Story 4.)
   tapping it MUST bring the user to the newest message.
 - **FR-046**: When the user sends a message (or retries a failed one), the screen MUST bring them to
   the newest message.
+- **FR-054**: If live updates of an open conversation stop because of an error, the screen MUST keep
+  showing the messages already loaded and show a clear error. When retrying can fix the cause
+  (connection or service problems), the app MUST try once more automatically and then offer a
+  **Retry** action; a successful retry MUST resume live updates without duplicating or losing loaded
+  messages. When retrying cannot fix the cause (no access to the conversation, conversation not
+  found, signed out), the error MUST be shown without Retry. Short connection drops that the app
+  recovers from by itself MUST show the offline indication (FR-014b), not an error.
 
 **Unread counts & read receipts**
 
@@ -483,6 +515,16 @@ notifications for it is deferred with User Story 4.)
 - **FR-051**: When the keyboard opens, the newest message MUST stay visible and the keyboard MUST NOT
   cover the message input.
 
+**Sign-out (Session 2026-11-02)**
+
+- **FR-052**: When the user signs out while some of their changes (in any part of the app) have not
+  yet been saved to the server, the app MUST warn them that these changes will be lost and offer
+  **Cancel** (stay signed in, changes kept) and **Log out** (sign out, changes discarded). Changes
+  MUST NOT be discarded without this warning. Without unsaved changes, sign-out proceeds directly.
+- **FR-053**: Signing out MUST remove all of the user's data kept on the device before the app can be
+  used again; if that removal fails, no account (the same or another) MUST be able to load data until
+  it succeeds. This makes FR-014b hold online and offline.
+
 **Security & privacy**
 
 - **FR-032**: Only a conversation's two participants MUST be able to see it, read, send or delete
@@ -519,21 +561,21 @@ notifications for it is deferred with User Story 4.)
   and 2 taps.
 - **SC-002**: 100% of contact attempts for the same pair of users, from any car, repeated taps or
   different devices, lead to the same single conversation.
-- **SC-003**: Under normal connectivity, a new message reaches the recipient's open app (conversation,
+- **SC-003**: Under normal connectivity (see Assumptions), a new message reaches the recipient's open app (conversation,
   list update or red dot) within 3 seconds in 95% of cases.
-- **SC-004** *(deferred with notifications)*: Under normal connectivity, a recipient whose app is in the background or closed receives
+- **SC-004** *(deferred with notifications)*: Under normal connectivity (see Assumptions), a recipient whose app is in the background or closed receives
   the notification within 10 seconds in 95% of cases.
-- **SC-005**: The sender sees "read" within 3 seconds of the recipient viewing the message in 95% of
-  cases.
+- **SC-005**: Under normal connectivity (see Assumptions), the sender sees "read" within 3 seconds of
+  the recipient viewing the message in 95% of cases.
 - **SC-006**: An existing conversation opens with its most recent messages within 2 seconds under
-  normal connectivity.
+  normal connectivity (see Assumptions).
 - **SC-007**: Unread counts and the red dot are correct (no stale or missing indicators) in 100% of
   tested scenarios.
 - **SC-008**: 0 cases where a non-participant can read, send or delete messages for a conversation
   during security testing (receiving its notifications: deferred with notifications).
 - **SC-009**: 100% of failed messages keep their text and can be resent once connectivity returns.
 - **SC-010**: All existing app flows covered by regression testing behave as before the feature.
-- **SC-011**: Under normal connectivity, each older batch of 20 messages appears within 2 seconds of
+- **SC-011**: Under normal connectivity (see Assumptions), each older batch of 20 messages appears within 2 seconds of
   reaching the top in 95% of cases, and in 100% of tested scenarios (long histories, exact multiples
   of 20, messages arriving or deleted during loading, rapid repeated scrolling) messages are never
   duplicated, missing or out of order and the visible message does not jump.
@@ -555,3 +597,11 @@ notifications for it is deferred with User Story 4.)
 - The existing sign-in system is reused; no separate chat account is needed.
 - Users normally have internet connectivity; offline sending beyond failed/retry (FR-014) is not
   required.
+- **Normal connectivity (performance test network)**, used by SC-003, SC-005, SC-006 and SC-011: the
+  test device uses a stable Wi-Fi or 4G connection. Before each measurement session, a baseline
+  probe runs from a computer on the same network: 10 consecutive reads of one small document in the
+  app's database (hosted in the United States, location `nam5`). The session counts as normal
+  connectivity when the probe median is **≤ 400 ms** with no failed request; the probe median and
+  p95 are recorded with the results. Sessions above that are recorded as degraded and are not used
+  to judge these success criteria. (The 400 ms bound follows from the targets: the slowest flow,
+  sending, needs about five round trips plus delivery, which stays under 3 seconds at 400 ms.)

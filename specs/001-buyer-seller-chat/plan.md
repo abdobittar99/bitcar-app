@@ -51,7 +51,8 @@ read-only offline; 1–1,000 chars; ≤ 20 messages/min/user; no Firebase import
 packages; deploy only `firestore:rules,firestore:indexes`
 
 **Scale/Scope**: 2 new screens, 2 blocs, 1 feature module (`features/chat`), 12 use cases, 4 Firestore paths, 1 rules
-test package; small changes to 7 existing app files + 3 Firebase config files. Messages load 20 at a time (FR-037)
+test package; small changes to existing app files (entry points, profile sync, sign-out cleanup across the 7 Firestore
+data classes) + 3 Firebase config files; 1 obsolete test deleted. Messages load 20 at a time (FR-037)
 
 ## Impact of the 2026-10-31 decisions on the system
 
@@ -107,6 +108,11 @@ favorites (decision #1, permissions audit E1–E13). No existing app code change
 | 10 | Message pagination (2026-11-01, owner addition) | Batches of 20 (FR-037 to FR-044, SC-011). **Option A**: bounded live `limit(20)` window + one-time `startAfter` cursor reads; plain-Dart `MessageCursor` (not `startAfterDocument`); deletions outside the newest 20 appear on next open; no new package, no rule change, no new index (research D17) |
 | 11 | Review findings F4–F6 (2026-11-01) | F4: "New messages" chip while scrolled up, sending jumps to newest (FR-045, FR-046). F5: opening marks all messages read (FR-015). F6: remaining notification wording marked deferred |
 | 12 | Chat screen details (2026-11-01) | Approved as proposed: long-press delete, time/day-separator format, accessibility labels + text scaling, inquiry replaces draft, keyboard behavior (FR-047 to FR-051; UI contract "Chat screen details"). Uses existing `intl` and Flutter widgets only |
+| 13 | Test gate (2026-11-02, analyze C1) | Default counter `test/widget_test.dart` replaced by Firebase-free `test/core/errors/app_error_listener_test.dart` (showError → SnackBar with the text; cubit back to `null`; `clear()` shows nothing). Final check runs the **whole** `flutter test`. Constitution unchanged |
+| 14 | Sign-out cleanup (2026-11-02, analyze G1) | **Option A**: persistence kept; on sign-out `SessionGate` closes (streams cancelled, new operations refused, in-flight drained) → `terminate()` → `clearPersistence()` → `signOut()`; deferred-wipe marker completed at startup before `runApp`; failed wipe keeps Firestore blocked and sign-out still completes (on sign-out and at startup); unsynced-writes warning via `waitForPendingWrites()` with Cancel / Log out (FR-052, FR-053); verified on a real device (research D18) |
+| 16 | chat-review CHK004/005/022/042 (2026-11-02) | Deleted messages count toward the 20; own sending/failed messages are extra and never the cursor (FR-037). Live window failure: loaded messages kept, one automatic retry after 3 s for retryable errors, then `ChatRetried` + Retry button; `permission`/`notFound`/`auth`/`validation` shown without Retry; single-subscription guard (FR-054, research D17). Quickstart rows ordered, Q26 added |
+| 17 | Normal connectivity (2026-11-02, chat-review CHK013) | Option A: performance sessions are valid when a baseline probe (10 authenticated REST reads of one `cars` document in `nam5`, timed with `curl`) has median ≤ 400 ms and no failure; median/p95 recorded; otherwise the session is degraded. 400 ms derived from the slowest flow (~5 round trips + delivery < 3 s). Spec Assumptions, quickstart probe, T085 |
+| 15 | Analysis medium issues (2026-11-02) | **U1** conversation listener first, messages listener restarts when own `clearedAt` changes; `clearedAt` passed to older batches. **U2** pending server timestamps arrive as `null` in 6.1.0 streams; own `lastReadAt`/`clearedAt` read as now. **U3** rate-limit transition never uses the device clock; denied new-window attempt → "too fast" message (D10). **U4/I2** already covered (T043, T047/T052). **N1** manual p95 measurement of SC-003/005/006/011 in T085. **I1 (a)** datasource returns models in Dart records; `ChatRepositoryImpl` builds all domain wrappers (D17) |
 
 No open decisions remain. The plan is ready for owner approval, then `/speckit-tasks`.
 
@@ -137,6 +143,7 @@ New files:
 lib/
 ├── core/
 │   ├── enums/message_status.dart                       # sending | sent | read | failed
+│   ├── session/session_gate.dart                       # SessionGate: open | closing | wipePending (research D18)
 │   └── validators/chat_validator.dart                  # trim, 1–1,000 chars
 ├── entities/
 │   ├── conversation.dart                               # ConversationEntity
@@ -158,6 +165,15 @@ lib/
     └── chat_room/
         ├── bloc/chat_{bloc,event,state}.dart
         └── ui/{chat_screen,message_list,message_bubble,message_input_bar,offline_banner}.dart
+lib/features/home/domain/usecase/
+├── has_pending_writes.dart                             # HasPendingWrites
+└── complete_pending_sign_out.dart                      # CompletePendingSignOut (startup)
+
+test/core/
+├── errors/app_error_listener_test.dart                 # replaces the default counter test/widget_test.dart
+└── session/session_gate_test.dart                      # gate states, refusal, stream cancel, drain, wipe retry
+test/features/home/home_bloc_logout_test.dart           # warning flow: cancel / confirm / no pending writes
+test/features/profile/profile_bloc_sync_test.dart       # sync point 2: called on name change only; failure keeps isSuccess
 
 test/features/chat/
 ├── conversations_bloc_test.dart
@@ -169,6 +185,7 @@ test/features/chat/
 
 firestore_tests/                                        # Node, dev-only, not part of the Flutter app
 ├── package.json                                        # devDeps: @firebase/rules-unit-testing, firebase; "test": "node --test"
+├── package-lock.json                                   # generated by npm install, committed
 ├── .gitignore                                          # node_modules/
 ├── helpers.js                                          # loads ../firestore.rules, test env, seeding, auth contexts
 ├── config.test.js                                      # firebase.json → firestore.rules wiring
@@ -190,8 +207,16 @@ Modified files:
 | `firestore.rules` | Replace allow-all with the rules contract |
 | `firestore.indexes.json` (root) | `conversations`: `participants` ARRAY_CONTAINS + `lastMessageAt` DESC |
 | `firebase.json` | Add `emulators.firestore` (port 8080) for the test suite; `functions` section left as is |
+| `test/widget_test.dart` | **Deleted** (default counter template; replaced by `test/core/errors/app_error_listener_test.dart`) |
+| `lib/main.dart` | After `init()`, before `runApp`: `await sl<CompletePendingSignOut>()()` (research D18 step 4) |
+| `lib/core/cache/cache_keys.dart` | `firestoreWipePending = 'firestore_wipe_pending'` |
+| `lib/features/home/data/datasource/home_remote_datasource.dart` | `hasPendingWrites()`, sign-out sequence (gate close → marker → `terminate` → `clearPersistence` → marker off → `signOut` → gate open), `completePendingWipe()` |
+| `lib/features/home/domain/repositories/home_repository.dart`, `data/repositories/home_repository_impl.dart` | `hasPendingWrites`, `completePendingSignOut` |
+| `lib/features/home/bloc/home_{bloc,event,state}.dart` | `LogoutPressed` → pending check; `LogoutConfirmed`, `LogoutCancelled`; `showUnsyncedWarning`, `isSigningOut`; `isClosed` guard |
+| `lib/features/home/ui/home_layout.dart` | Also: blocking "Signing out…" view while `isSigningOut`; unsynced-changes dialog (`BlocListener`) |
+| `lib/features/{auth,car,favorite,feeds,profile}/data/datasource/*_remote_datasource.dart`, `lib/features/search/data/repositories/search_repository_impl.dart` | Inject `SessionGate`; wrap every Firestore future in `gate.run(...)` (no behavior change while signed in) |
 
-Not modified (rev. 2): `home_bloc.dart`, `AndroidManifest.xml`, `cache_keys.dart`, `functions/index.js`, `pubspec.yaml`.
+Not modified: `AndroidManifest.xml`, `functions/index.js`, `pubspec.yaml`, `.specify/memory/constitution.md`.
 
 **Structure Decision**: Single Flutter app, existing feature-first layout; `features/chat/` mirrors the `features/car/`
 umbrella. Firebase config stays in the existing root files referenced by `firebase.json`. The rules test package lives
@@ -215,12 +240,18 @@ a future functions deployment.
 
 | Stream | Opened | Closed |
 |---|---|---|
-| Conversations (`participants array-contains uid`) | `ConversationsStarted` when `HomeLayout` builds | `ConversationsBloc.close()` when `HomeLayout` is disposed (logout) |
-| Messages live window (`limit(20)`) + conversation doc | `ChatStarted` | `ChatBloc.close()` when `ChatScreen` pops |
+| Conversations (`participants array-contains uid`) | `ConversationsStarted` when `HomeLayout` builds | **Sign-out:** first by `SessionGate.closeForSignOut()` (before `terminate` and `signOut`, research D18); later `ConversationsBloc.close()` when `HomeLayout` is disposed |
+| Messages live window (`limit(20)`) + conversation doc | `ChatStarted`; again on `ChatRetried` (or the single automatic retry 3 s after a retryable failure), only when no subscription exists | `ChatBloc.close()` when `ChatScreen` pops; on a stream error (subscription cleared, loaded messages kept, FR-054); on sign-out, first by `SessionGate.closeForSignOut()` |
 
 Older batches are one-time `Future` reads, not streams. Each bloc keeps its `StreamSubscription`, cancels the old one
 before subscribing again, forwards data and errors as private events (never `emit` from a listener callback), and
 cancels it in `close()`. No listener runs without a limit.
+
+**Sign-out order (D18):** (1) `SessionGate.closeForSignOut()` cancels every Firestore listener registered through
+`watch` (the blocs receive *done*, not an error) and refuses new operations; (2) `terminate()` → `clearPersistence()`;
+(3) `auth.signOut()`; (4) the auth stream switches `AppRoot` to `LoginScreen`, and disposing `HomeLayout` closes its
+blocs. Step 4 is an additional, later stage: by then no listener is active, so bloc disposal only releases the
+already-finished subscriptions.
 
 ## Message pagination (FR-037 to FR-046, option A)
 
@@ -250,4 +281,13 @@ are unchanged by this addition.
 ## Complexity Tracking
 
 No constitution violations. Cross-feature edits are limited to the documented entry points (home app bar, car details),
-the public-name sync in `ProfileBloc`, and the approved rules replacement.
+the public-name sync in `ProfileBloc`, the approved rules replacement, and the sign-out cleanup (decision 14).
+
+| Cross-cutting change | Why it is needed | Simpler alternative rejected because |
+|---|---|---|
+| `SessionGate` (plain Dart, `lib/core/session/`) injected into all 7 Firestore data classes | FR-053 / owner condition: no Firestore operation may run during sign-out cleanup, and none may run while a failed wipe is pending | Relying on bloc disposal: `HomeLayout` is disposed only **after** `signOut()`, and in-flight calls could restart the instance between `terminate` and `clearPersistence` |
+| Startup call in `main.dart` before `runApp` | Deferred wipe must run before any Firestore access or user session | Running it in `SplashBloc`: the auth stream and `HomeLayout` may touch Firestore first |
+
+Constitution check for these: Firebase stays in datasources (`HomeRemoteDataSource`); the gate has no Firebase or
+Flutter imports; blocs use use cases only (`HasPendingWrites`, `LogOut`); errors are `AppException` through
+`AppErrorCubit`; the full `flutter test` gate is kept (decision 13).

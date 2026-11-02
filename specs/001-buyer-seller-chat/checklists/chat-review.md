@@ -16,69 +16,69 @@ found while preparing this checklist (see Notes).
 
 ## Pagination — Requirement Completeness
 
-- [ ] CHK001 - Is the initial batch size (20 most recent messages) stated as a requirement, not only as a design constant? [Completeness, Spec §FR-037]
-- [ ] CHK002 - Is the trigger for loading older messages defined precisely enough to test (reaching the top of the loaded list, and how close counts as "the top")? [Clarity, Spec §FR-038, Plan §Message pagination]
-- [ ] CHK003 - Is the stop condition ("oldest message reached") defined, including the case where the history is an exact multiple of 20? [Completeness, Spec §FR-038, Spec §Edge Cases]
-- [ ] CHK004 - Is it specified whether deleted-message placeholders count toward the 20 messages of a batch? [Clarity, Gap]
-- [ ] CHK005 - Is it specified whether the user's own unsent (sending/failed) messages count toward the first 20? [Clarity, Gap]
-- [ ] CHK006 - Is the boundary of the history visible to the user after a one-sided conversation delete defined for pagination (batches stop at the clear point)? [Coverage, Spec §FR-027a, Spec §Edge Cases]
-- [ ] CHK007 - Are loading, error-with-retry and "no older messages" states each defined with their visible content and placement? [Completeness, Spec §FR-043, Contract §message_list.dart]
-- [ ] CHK008 - Is the retry behavior defined to request the same batch, not the next one? [Clarity, Spec §FR-043]
+- [x] CHK001 - Is the initial batch size (20 most recent messages) stated as a requirement, not only as a design constant? [Completeness, Spec §FR-037]
+- [x] CHK002 - Is the trigger for loading older messages defined precisely enough to test (reaching the top of the loaded list, and how close counts as "the top")? [Clarity, Spec §FR-038, Plan §Message pagination]
+- [x] CHK003 - Is the stop condition ("oldest message reached") defined, including the case where the history is an exact multiple of 20? [Completeness, Spec §FR-038, Spec §Edge Cases]
+- [x] CHK004 - Is it specified whether deleted-message placeholders count toward the 20 messages of a batch? [Clarity, Gap]
+- [x] CHK005 - Is it specified whether the user's own unsent (sending/failed) messages count toward the first 20? [Clarity, Gap]
+- [x] CHK006 - Is the boundary of the history visible to the user after a one-sided conversation delete defined for pagination (batches stop at the clear point)? [Coverage, Spec §FR-027a, Spec §Edge Cases]
+- [x] CHK007 - Are loading, error-with-retry and "no older messages" states each defined with their visible content and placement? [Completeness, Spec §FR-043, Contract §message_list.dart]
+- [x] CHK008 - Is the retry behavior defined to request the same batch, not the next one? [Clarity, Spec §FR-043]
 
 ## Pagination — Clarity & Measurability
 
-- [ ] CHK009 - Is "messages must not be duplicated" defined across every source of messages (first batch, older batches, live arrivals, own sends, retries)? [Clarity, Spec §FR-039]
-- [ ] CHK010 - Is the chronological order defined with a tie-break rule for messages with the same send time? [Clarity, Spec §FR-040, Research §D17]
-- [ ] CHK011 - Is "keep the scroll position" stated in a measurable form (which element must stay where on screen)? [Measurability, Spec §FR-041]
-- [ ] CHK012 - Is "only one pagination request at a time" defined, including what happens to requests made while one is running (ignored, not queued)? [Clarity, Spec §FR-042]
-- [ ] CHK013 - Is the older-batch performance target quantified and tied to a stated network condition? [Measurability, Spec §SC-011]
-- [ ] CHK014 - Can SC-011's "never duplicated, missing or out of order" be objectively verified with the listed scenarios? [Measurability, Spec §SC-011, Quickstart §Q19–Q22]
+- [x] CHK009 - Is "messages must not be duplicated" defined across every source of messages (first batch, older batches, live arrivals, own sends, retries)? [Clarity, Spec §FR-039]
+- [x] CHK010 - Is the chronological order defined with a tie-break rule for messages with the same send time? [Clarity, Spec §FR-040, Research §D17]
+- [x] CHK011 - Is "keep the scroll position" stated in a measurable form (which element must stay where on screen)? [Measurability, Spec §FR-041]
+- [x] CHK012 - Is "only one pagination request at a time" defined, including what happens to requests made while one is running (ignored, not queued)? [Clarity, Spec §FR-042]
+- [x] CHK013 - Is the older-batch performance target quantified and tied to a stated network condition? [Measurability, Spec §SC-011]
+- [x] CHK014 - Can SC-011's "never duplicated, missing or out of order" be objectively verified with the listed scenarios? [Measurability, Spec §SC-011, Quickstart §Q19–Q22]
 
 ## Live Messages vs. Pagination — Consistency of the Technical Design
 
-- [ ] CHK015 - Does the plan state that recent messages use a **bounded** Firestore stream (`limit(20)`), as the owner requires, rather than a listener without a limit? [Conflict, Plan §Message pagination, Research §D17] **⚠ Finding F1**
-- [ ] CHK016 - Does the plan state that older batches are loaded with cursor-based queries, and whether they are one-time reads or live listeners? [Conflict, Research §D17, Contract §ChatBloc] **⚠ Finding F1**
-- [ ] CHK017 - Is the behavior defined for messages that move out of the bounded live window when new messages arrive (kept on screen, and how they are updated afterwards)? [Gap] **⚠ Finding F2**
-- [ ] CHK018 - Is FR-044 (older messages stay up to date) consistent with the chosen loading method for older batches? [Conflict, Spec §FR-044] **⚠ Finding F2**
-- [ ] CHK019 - Is it documented that read state for any loaded message comes from the conversation's `lastReadAt`, so it stays live even for messages loaded once? [Clarity, Data-model §MessageModel, Spec §FR-015]
-- [ ] CHK020 - Is the cursor type decided (`startAfterDocument` with a `DocumentSnapshot` vs. `startAfter` with field values) and consistent with the constitution rule that `DocumentSnapshot` must not be extended to new code above the datasource? [Consistency, Constitution II, Research §D17] **⚠ Finding F3**
-- [ ] CHK021 - Is the cursor defined as the oldest message loaded overall (not the oldest in the live window), so no gap or overlap appears between the window and the first older batch? [Clarity, Gap] **⚠ Finding F2**
-- [ ] CHK022 - Are the listener lifecycle rules (open, replace, cancel on screen close, cancel on error) consistent between plan, research and the bloc contract? [Consistency, Plan §Stream lifecycle, Contract §ChatBloc]
-- [ ] CHK023 - Are the Firestore read-cost implications of the chosen pagination design documented against the Spark free quota? [Non-Functional, Research §D16]
+- [x] CHK015 - Does the plan state that recent messages use a **bounded** Firestore stream (`limit(20)`), as the owner requires, rather than a listener without a limit? [Conflict, Plan §Message pagination, Research §D17] **⚠ Finding F1**
+- [x] CHK016 - Does the plan state that older batches are loaded with cursor-based queries, and whether they are one-time reads or live listeners? [Conflict, Research §D17, Contract §ChatBloc] **⚠ Finding F1**
+- [x] CHK017 - Is the behavior defined for messages that move out of the bounded live window when new messages arrive (kept on screen, and how they are updated afterwards)? [Gap] **⚠ Finding F2**
+- [x] CHK018 - Is FR-044 (older messages stay up to date) consistent with the chosen loading method for older batches? [Conflict, Spec §FR-044] **⚠ Finding F2**
+- [x] CHK019 - Is it documented that read state for any loaded message comes from the conversation's `lastReadAt`, so it stays live even for messages loaded once? [Clarity, Data-model §MessageModel, Spec §FR-015]
+- [x] CHK020 - Is the cursor type decided (`startAfterDocument` with a `DocumentSnapshot` vs. `startAfter` with field values) and consistent with the constitution rule that `DocumentSnapshot` must not be extended to new code above the datasource? [Consistency, Constitution II, Research §D17] **⚠ Finding F3**
+- [x] CHK021 - Is the cursor defined as the oldest message loaded overall (not the oldest in the live window), so no gap or overlap appears between the window and the first older batch? [Clarity, Gap] **⚠ Finding F2**
+- [x] CHK022 - Are the listener lifecycle rules (open, replace, cancel on screen close, cancel on error) consistent between plan, research and the bloc contract? [Consistency, Plan §Stream lifecycle, Contract §ChatBloc]
+- [x] CHK023 - Are the Firestore read-cost implications of the chosen pagination design documented against the Spark free quota? [Non-Functional, Research §D16]
 
 ## Live Messages — Scenario Coverage
 
-- [ ] CHK024 - Is the behavior defined when a new message arrives while the user is scrolled up reading older messages (stay in place, show a "new messages" hint, or jump to bottom)? [Gap] **⚠ Finding F4**
-- [ ] CHK025 - Is the behavior defined when the user sends a message while scrolled up (does the list return to the newest message)? [Gap] **⚠ Finding F4**
-- [ ] CHK026 - Is the behavior defined when a new message arrives or a message is deleted while an older batch is loading? [Coverage, Spec §Edge Cases]
-- [ ] CHK027 - Is the unread/read rule defined when more unread messages exist than the first 20 loaded (are messages never shown on screen marked read)? [Conflict, Spec §FR-015, Spec §FR-037] **⚠ Finding F5**
-- [ ] CHK028 - Are offline requirements for pagination defined (cached batches shown, no false "beginning" state, resumes on reconnect)? [Coverage, Spec §FR-043, Spec §FR-014b]
-- [ ] CHK029 - Is recovery after a lost connection defined for both the live window and pagination (missed messages appear once, no duplicates)? [Recovery, Spec §Edge Cases, Spec §FR-039]
+- [x] CHK024 - Is the behavior defined when a new message arrives while the user is scrolled up reading older messages (stay in place, show a "new messages" hint, or jump to bottom)? [Gap] **⚠ Finding F4**
+- [x] CHK025 - Is the behavior defined when the user sends a message while scrolled up (does the list return to the newest message)? [Gap] **⚠ Finding F4**
+- [x] CHK026 - Is the behavior defined when a new message arrives or a message is deleted while an older batch is loading? [Coverage, Spec §Edge Cases]
+- [x] CHK027 - Is the unread/read rule defined when more unread messages exist than the first 20 loaded (are messages never shown on screen marked read)? [Conflict, Spec §FR-015, Spec §FR-037] **⚠ Finding F5**
+- [x] CHK028 - Are offline requirements for pagination defined (cached batches shown, no false "beginning" state, resumes on reconnect)? [Coverage, Spec §FR-043, Spec §FR-014b]
+- [x] CHK029 - Is recovery after a lost connection defined for both the live window and pagination (missed messages appear once, no duplicates)? [Recovery, Spec §Edge Cases, Spec §FR-039]
 
 ## UI Integration — Completeness & Clarity
 
-- [ ] CHK030 - Are the placement and visibility rules of both entry points (app-bar chat icon with red dot; "Chat with Seller" above the phone button) specified unambiguously? [Clarity, Spec §FR-026, Contract §Entry points]
-- [ ] CHK031 - Is the red-dot rule consistent between US3 ("elsewhere in the app") and FR-017 ("not on the conversations screen"), including while inside a conversation? [Consistency, Spec §FR-017, Spec §US3]
-- [ ] CHK032 - Is the interaction for deleting a message (gesture or menu, confirmation text) specified? [Gap, Spec §FR-027]
-- [ ] CHK033 - Is the send-time display format (time only, date separators for older days) specified for messages and the list preview? [Clarity, Spec §FR-011, Gap]
-- [ ] CHK034 - Are the visual rules for message states (sending, sent, read, failed, deleted) defined consistently between spec and the bubble contract? [Consistency, Spec §FR-013, Contract §message_bubble]
-- [ ] CHK035 - Is the header content of the chat screen defined for new conversations, existing ones and the "BitCar user" placeholder? [Completeness, Spec §FR-004, Data-model §participantNames]
-- [ ] CHK036 - Is "follow BitCar's existing visual style" made verifiable by naming the shared components and styles to reuse? [Measurability, Spec §FR-035, Plan §Constitution Check V]
-- [ ] CHK037 - Are accessibility requirements (screen-reader labels for status icons, the red dot and the top pagination row; text scaling) specified or explicitly excluded? [Gap, Non-Functional]
-- [ ] CHK038 - Is the draft behavior defined when the chat is opened from another car while a draft or the previous inquiry text is in the input? [Coverage, Spec §FR-007, Spec §FR-009]
-- [ ] CHK039 - Are keyboard behaviors defined (the list stays on the newest message when the keyboard opens; the input bar is not hidden)? [Gap]
+- [x] CHK030 - Are the placement and visibility rules of both entry points (app-bar chat icon with red dot; "Chat with Seller" above the phone button) specified unambiguously? [Clarity, Spec §FR-026, Contract §Entry points]
+- [x] CHK031 - Is the red-dot rule consistent between US3 ("elsewhere in the app") and FR-017 ("not on the conversations screen"), including while inside a conversation? [Consistency, Spec §FR-017, Spec §US3]
+- [x] CHK032 - Is the interaction for deleting a message (gesture or menu, confirmation text) specified? [Gap, Spec §FR-027]
+- [x] CHK033 - Is the send-time display format (time only, date separators for older days) specified for messages and the list preview? [Clarity, Spec §FR-011, Gap]
+- [x] CHK034 - Are the visual rules for message states (sending, sent, read, failed, deleted) defined consistently between spec and the bubble contract? [Consistency, Spec §FR-013, Contract §message_bubble]
+- [x] CHK035 - Is the header content of the chat screen defined for new conversations, existing ones and the "BitCar user" placeholder? [Completeness, Spec §FR-004, Data-model §participantNames]
+- [x] CHK036 - Is "follow BitCar's existing visual style" made verifiable by naming the shared components and styles to reuse? [Measurability, Spec §FR-035, Plan §Constitution Check V]
+- [x] CHK037 - Are accessibility requirements (screen-reader labels for status icons, the red dot and the top pagination row; text scaling) specified or explicitly excluded? [Gap, Non-Functional]
+- [x] CHK038 - Is the draft behavior defined when the chat is opened from another car while a draft or the previous inquiry text is in the input? [Coverage, Spec §FR-007, Spec §FR-009]
+- [x] CHK039 - Are keyboard behaviors defined (the list stays on the newest message when the keyboard opens; the input bar is not hidden)? [Gap]
 
 ## Consistency Across Documents
 
-- [ ] CHK040 - Are the stale notification statements removed or marked deferred everywhere (e.g. the Assumption that the notification dependency is approved, FR-009 "or a notification", US6 "receives no notifications", FR-032 "receive its notifications")? [Conflict, Spec §Assumptions, Spec §FR-009, Spec §FR-032] **⚠ Finding F6**
-- [ ] CHK041 - Do the use-case count, file list and DI registrations match across plan, chat-repository contract and data-model (12 use cases, `MessageCursor`, `message_list.dart`)? [Consistency, Plan §Project Structure, Contract §Use cases]
-- [ ] CHK042 - Are quickstart scenarios traceable to every pagination requirement FR-037 to FR-044 and ordered consistently? [Traceability, Quickstart §Q19–Q22]
-- [ ] CHK043 - Is SC-006 ("opens with its most recent messages within 2 s") consistent with the first-batch rule of FR-037? [Consistency, Spec §SC-006, Spec §FR-037]
+- [x] CHK040 - Are the stale notification statements removed or marked deferred everywhere (e.g. the Assumption that the notification dependency is approved, FR-009 "or a notification", US6 "receives no notifications", FR-032 "receive its notifications")? [Conflict, Spec §Assumptions, Spec §FR-009, Spec §FR-032] **⚠ Finding F6**
+- [x] CHK041 - Do the use-case count, file list and DI registrations match across plan, chat-repository contract and data-model (12 use cases, `MessageCursor`, `message_list.dart`)? [Consistency, Plan §Project Structure, Contract §Use cases]
+- [x] CHK042 - Are quickstart scenarios traceable to every pagination requirement FR-037 to FR-044 and ordered consistently? [Traceability, Quickstart §Q19–Q22]
+- [x] CHK043 - Is SC-006 ("opens with its most recent messages within 2 s") consistent with the first-batch rule of FR-037? [Consistency, Spec §SC-006, Spec §FR-037]
 
 ## Dependencies & Assumptions
 
-- [ ] CHK044 - Is the assumption that messages are never hard-deleted (which keeps cursor ranges stable) stated as a requirement-level constraint and backed by the rules contract? [Assumption, Data-model §Index, Rules §messages delete]
-- [ ] CHK045 - Is it documented that no new package (e.g. `bloc_concurrency`) is needed for the single-request rule? [Dependency, Research §D17, Constitution]
+- [x] CHK044 - Is the assumption that messages are never hard-deleted (which keeps cursor ranges stable) stated as a requirement-level constraint and backed by the rules contract? [Assumption, Data-model §Index, Rules §messages delete]
+- [x] CHK045 - Is it documented that no new package (e.g. `bloc_concurrency`) is needed for the single-request rule? [Dependency, Research §D17, Constitution]
 
 ## Notes
 
@@ -100,7 +100,11 @@ Findings found while preparing this checklist (proposed fixes in the review summ
 **Resolution (2026-11-01, owner decisions)**: F1/F2 → option A applied (bounded `limit(20)` window, one-time cursor
 reads, FR-044 narrowed; research D17). F3 → `startAfter([createdAt, id])` with plain-Dart `MessageCursor`. F4 →
 FR-045, FR-046. F5 → FR-015 (opening marks all read). F6 → notification wording marked deferred. UI gaps behind CHK032,
-CHK033, CHK037, CHK038, CHK039 → approved as proposed: FR-047 to FR-051. Checkboxes are left for the reviewer.
+CHK033, CHK037, CHK038, CHK039 → approved as proposed: FR-047 to FR-051.
+
+**Review 2026-11-02 (owner-approved marks)**: 40 items satisfied by existing evidence. CHK004/CHK005 → FR-037
+clarified; CHK022 → FR-054 + `ChatRetried` (research D17, UI contract, T045/T051/T055); CHK042 → quickstart rows
+ordered. CHK013 → option A: spec Assumptions define normal connectivity (baseline probe median ≤ 400 ms, no failures; quickstart probe; T085). Marks mean requirements quality, not implementation. Checkboxes are left for the reviewer.
 
 - Mark items `[x]` only after review confirms the requirement-quality criterion is satisfied
 - Leave items unchecked when they still require clarification, correction, or reviewer evaluation

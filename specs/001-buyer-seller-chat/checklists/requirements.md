@@ -49,3 +49,9 @@
   wording marked deferred). All items still pass.
 - 2026-11-01 (UI details approved): FR-047 to FR-051 (delete gesture, time format, accessibility,
   draft replacement, keyboard). All items still pass.
+- 2026-11-02 (analysis review): FR-052 (unsynced-changes warning on sign-out) and FR-053 (device
+  data removed on sign-out, blocked until removal succeeds) added; FR-014b unchanged. All items
+  still pass.
+- 2026-11-02 (chat-review follow-up): FR-037 clarified (deleted messages count toward 20; own unsent
+  messages are extra and never affect the limit or cursor); FR-054 added (live update failure,
+  Retry only when it can help). All items still pass.

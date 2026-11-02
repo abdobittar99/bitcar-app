@@ -110,10 +110,14 @@ Computed: `isVisibleInList => lastMessageAt != null && (clearedAt == null || las
 
 ## 3. Domain wrappers (`features/chat/domain/model/`)
 
+Built **only in `ChatRepositoryImpl`** (constitution I, analysis I1). The datasource returns models inside Dart
+records, e.g. `({List<MessageModel> messages, DateTime? otherLastReadAt, int unreadCount, DateTime? clearedAt, bool
+isFromCache})`, and never imports `features/chat/domain/`.
+
 | Class (file) | Fields | Purpose |
 |---|---|---|
 | `ConversationsUpdate` (`conversations_update.dart`) | `List<ConversationEntity> conversations`, `bool isFromCache` | One emission of the list stream; `isFromCache` drives the offline banner (FR-014b) |
-| `MessagesUpdate` (`messages_update.dart`) | `List<MessageEntity> messages`, `DateTime? otherLastReadAt`, `int unreadCount`, `bool isFromCache` | One emission of the live window (newest 20) together with the conversation's read state (other user's `lastReadAt`, own `unreadCount`) |
+| `MessagesUpdate` (`messages_update.dart`) | `List<MessageEntity> messages`, `DateTime? otherLastReadAt`, `int unreadCount`, `DateTime? clearedAt`, `bool isFromCache` | One emission of the live window (newest 20) together with the conversation's read state (other user's `lastReadAt`, own `unreadCount`) |
 | `MessagesPage` (`messages_page.dart`) | `List<MessageEntity> messages`, `bool hasOlder`, `bool isFromCache` | Result of one older-batch read. `hasOlder` is false only when the **server** returned fewer than 20 |
 | `MessageCursor` (`message_cursor.dart`) | `DateTime createdAt`, `String messageId` | Plain-Dart cursor: the oldest server-confirmed message loaded overall (research D17); the datasource maps it to `startAfter([Timestamp, id])` |
 | `ChatTarget` (`chat_target.dart`) | `String conversationId`, `String otherUserId`, `String otherUserName`, `bool exists` | Result of opening a chat from a car or the conversations list (FR-003, FR-004) |
@@ -122,7 +126,7 @@ Computed: `isVisibleInList => lastMessageAt != null && (clearedAt == null || las
 
 | Model | Extends | Responsibilities |
 |---|---|---|
-| `ConversationModel` (`conversation_model.dart`) | `ConversationEntity` | `fromMap(map, id, currentUid)`: `Timestamp` → `DateTime` with `ServerTimestampBehavior.estimate`, map lookups per uid; `static String idFor(String a, String b)` |
+| `ConversationModel` (`conversation_model.dart`) | `ConversationEntity` | `fromMap(map, id, currentUid)`: `Timestamp` → `DateTime`, map lookups per uid. `snapshots()` in cloud_firestore 6.1.0 has **no** `serverTimestampBehavior` option, so an own pending `serverTimestamp()` (only `lastReadAt[uid]` / `clearedAt[uid]`, written with plain `update`) arrives as a present key with `null` value and is read as `DateTime.now()`. Sends are transactions, so `createdAt` / `lastMessageAt` are never pending locally; `static String idFor(String a, String b)` |
 | `MessageModel` (`message_model.dart`) | `MessageEntity` | `fromMap(map, id, cid)` with status `sent` for server-confirmed messages; `toCreateMap()` with `serverTimestamp()`. `read` is applied in `ChatState` from the latest `otherLastReadAt` (`createdAt <= otherLastReadAt`), so it stays live for older batches too (FR-044) |
 
 ## 5. Validation rules (from requirements)
@@ -175,6 +179,17 @@ Computed: `isVisibleInList => lastMessageAt != null && (clearedAt == null || las
  olderFailed ── retry ──► loadingOlder               (same cursor)
 ```
 
+### Live window status (`ChatStreamStatus`, FR-054)
+
+```text
+ live ── stream error, retryable type ──► failedRetryable ── 3 s (once) / Retry ──► retrying ── first update ──► live
+ live ── stream error, permission | notFound | auth | validation ──► failedFatal   (no Retry)
+ retrying ── error ──► failedRetryable (Retry only, no more automatic retry) | failedFatal
+ any ── session ended (stream done, D18) ──► no change, nothing shown
+```
+
+On every failure the live messages move to the loaded-once source, so the screen keeps them.
+
 ### Message sources inside `ChatState` (FR-039, FR-044)
 
 ```text
@@ -184,6 +199,21 @@ Computed: `isVisibleInList => lastMessageAt != null && (clearedAt == null || las
 ```
 
 Batch size is a constant `messagesPageSize = 20` (spec FR-037/FR-038).
+
+### Session gate and sign-out (research D18, FR-014b, FR-052, FR-053)
+
+```text
+ open ── LogoutConfirmed / no pending writes ──► closing   (streams cancelled, new operations refused,
+                                                          in-flight drained ≤ 5 s)
+ closing ── terminate + clearPersistence OK ──► open       (marker removed, auth.signOut())
+ closing ── wipe fails ──► wipePending                     (marker kept, auth.signOut() still runs)
+ wipePending ── any Firestore operation ──► retry wipe ── OK ──► open
+                                                    └── fails ──► refused (ErrorType.cache)
+ app start with marker set ──► wipe + signOut before runApp ──► open | wipePending
+```
+
+Local device key (SharedPreferences via `CacheHelper`): `CacheKeys.firestoreWipePending = 'firestore_wipe_pending'`
+(bool). Set before `terminate()`, removed after a successful `clearPersistence()`.
 
 ### Unread count (per user, per conversation)
 

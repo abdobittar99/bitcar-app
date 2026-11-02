@@ -14,6 +14,7 @@ All findings below were checked against the current code in this repository, not
 | 5. Names snapshotted at creation; uid is the identity | `participantNames` written once when the conversation is created; never synced |
 | 6. Option B: `users` docs stay private | Without a function, the creator cannot learn the seller's name from `users`. Solved with `publicProfiles/{uid}` (`displayName` only), approved in rev. 3 with the placeholder rule (D14) |
 | Rev. 3 (owner review) | `displayName` must match `users.fullName`; sync on app open and on name change; placeholder `"BitCar user"` allowed only when no public profile exists; tests load the real `firestore.rules`; JDK 21 alongside 17 |
+| Rev. 5 (2026-11-02, analyze C1/G1) | Default counter test replaced by a Firebase-free `AppErrorListener` test; full `flutter test` gate. Sign-out wipes the Firestore cache (option A) behind a `SessionGate`, with a pending-writes warning (D18) |
 | Rev. 4 (2026-11-01, owner addition + option A) | Message history in batches of 20: a bounded live `limit(20)` window for the newest messages and one-time cursor reads (`startAfter`) for older batches; plain-Dart `MessageCursor`; merge by message id; "New messages" chip; opening marks all read (D17). Replaces "re-subscribe with `limit + 30`" |
 
 ## Codebase findings (verified)
@@ -33,7 +34,7 @@ All findings below were checked against the current code in this repository, not
 | Blocs are provided in `HomeLayout` or per screen; pushed screens get parent blocs via `BlocProvider.value` | `home_layout.dart` | `ConversationsBloc` in `HomeLayout`, `ChatBloc` per screen (D6) |
 | `GetCurrentUser` (home) returns `UserEntity` (id, fullName, role), already reused across features | DI container | Reused for the own-car check and to publish the user's public name |
 | Shared widgets: `EmptyState`, `AppButton`, `confirmDelete` (hard-coded car texts), `AppErrorListener` | `shared/components/general_widget/` | Reused; `confirmDelete` gets optional title/message |
-| `test/widget_test.dart` is the default counter template | file content | Pre-existing failure; not a baseline |
+| `test/widget_test.dart` is the default counter template (pumps `MyApp`, expects a counter) | file content | Always fails; replaced by `test/core/errors/app_error_listener_test.dart` (rev. 5) so the full `flutter test` gate can pass |
 | No `bloc_test`, `mocktail`, `bloc_concurrency`, `fake_cloud_firestore` | `pubspec.yaml` | Dart tests use `flutter_test` + hand-written fakes |
 
 ## Decisions
@@ -81,7 +82,9 @@ All findings below were checked against the current code in this repository, not
 ### D6. Bloc placement
 
 - `ConversationsBloc`: factory, provided once in `HomeLayout` (like `FavoriteBloc`); one listener feeds the app-bar red
-  dot and the conversations screen. Closed when `HomeLayout` is disposed (logout).
+  dot and the conversations screen. On sign-out its listener is cancelled first by `SessionGate.closeForSignOut()`,
+  before `terminate()` and `signOut()` (D18); the bloc itself is closed later, when the auth stream disposes
+  `HomeLayout`.
 - `ChatBloc`: factory, created per `ChatScreen`, closed when the screen pops.
 
 ### D7. Notifications: deferred, with explicit extension points (decision 3)
@@ -117,6 +120,14 @@ All findings below were checked against the current code in this repository, not
 - **Decision**: `chatRateLimits/{uid}` = `{ windowStart, count }` updated in the send transaction; a message create is
   only allowed together with a valid counter transition (`getAfter()`). The client pre-checks to show the error
   instantly; the rule is authoritative (FR-014a). Works on Spark (no function).
+- **No device clock in the transition (rev. 5, analysis U3)**: the client never decides from its own clock whether
+  the 60 s window is over. `count < 20` → same window (`count + 1`), which the rules accept at any time;
+  `count == 20` → new window (`count: 1`, `windowStart: serverTimestamp`), which the rules accept only if
+  `request.time >= windowStart + 60 s`. A `permission-denied` on that new-window attempt is mapped to the
+  "You're sending messages too fast, try again shortly" error and the message stays `failed` for retry. Clock skew
+  therefore cannot cause a wrong or generic error.
+- **Known property of fixed windows**: up to about 40 messages can pass around the boundary of two consecutive windows
+  (20 at the end of one, 20 at the start of the next). Accepted; a sliding window would need a much heavier rule.
 
 ### D11. Platforms
 
@@ -219,8 +230,33 @@ messages use cursor-based one-time reads. No listener ever runs over the convers
     removing them; a message disappears from the screen only if it is no longer in any source, which never happens
     because messages are never hard-deleted.
   - **Conversation state in the same update**: the datasource also listens to the conversation document and adds the
-    other user's `lastReadAt` and the user's own `unreadCount` to each `MessagesUpdate` (merged with a plain
+    other user's `lastReadAt`, the user's own `unreadCount` and own `clearedAt` to each update (merged with a plain
     `StreamController`; no `rxdart`). Both listeners are cancelled together.
+  - **Listener order (rev. 5, analysis U1)**: the conversation listener starts first; the messages listener starts
+    after its first snapshot with the current `clearedAt[uid]`, and is cancelled and restarted when that value
+    changes. Older batches receive the same `clearedAt` from the bloc as `after`, so the datasource stays stateless.
+  - **Pending server timestamps (rev. 5, analysis U2)**: `snapshots()` in cloud_firestore 6.1.0 has no
+    `serverTimestampBehavior` (only `get()` via `GetOptions`), so a pending `serverTimestamp()` arrives as `null`.
+    Sends are transactions and never appear locally before commit, so this only affects the user's own
+    `lastReadAt` / `clearedAt` written with plain `update`: a present key with `null` is read as `DateTime.now()`.
+    A message with `null` `createdAt` (not expected) stays `sending` and is never a cursor.
+  - **Local unsent messages (rev. 5, CHK005)**: `pendingMessages` are never part of a Firestore query, so they do
+    not count toward `limit(20)` and are never the cursor (the cursor is the oldest **server-confirmed** message).
+    When the sent message's id arrives in the live window, the pending copy is dropped (same id, FR-037, FR-039).
+    Deleted messages are normal documents (`deleted: true`), so they count toward the 20 (CHK004).
+  - **Live window failure and retry (rev. 5, CHK022, FR-054)**: Firestore listeners recover from short network drops
+    by themselves (cached data, `isFromCache` → offline banner, no error). An error on the stream is terminal for
+    that listener, so `_MessagesFailed` clears the subscription and keeps every loaded message (`liveMessages` move to
+    `loadedMessages`, so nothing disappears). Classification by `AppException.type`:
+    **retryable** = `network`, `firestore`, `unknown`, `platform`, `server`, `cache`; **not retryable** =
+    `permission`, `notFound`, `auth`, `validation`. A retryable failure triggers **one** automatic retry after 3 s,
+    then shows Retry; a non-retryable one shows the error without Retry. `ChatRetried` is ignored unless the status
+    is `failedRetryable` and no subscription exists; it cancels any leftover subscription before subscribing again,
+    so at most one live-window listener exists. The new window's messages are merged by id (live > loaded >
+    pending), so nothing is duplicated; the cursor is unchanged. A stream closed because the session ended (D18) is
+    *done*, not an error, and shows nothing.
+  - **Records, not domain types (rev. 5, analysis I1)**: the datasource returns models in Dart records; the
+    repository impl builds `MessagesUpdate` / `MessagesPage` / `ChatTarget` / `ConversationsUpdate`.
 - **Older batches (FR-038)** — `loadOlderMessages(before: cursor)`: a one-time `get()` on
   `orderBy(createdAt desc, __name__ desc).startAfter([Timestamp, messageId]).limit(20)`.
   - **Cursor**: plain-Dart `MessageCursor { DateTime createdAt; String messageId }`, the **oldest server-confirmed
@@ -271,3 +307,74 @@ messages use cursor-based one-time reads. No listener ever runs over the convers
   - **Re-subscribe with a growing `limit`**: re-reads every loaded message on each step. Rejected.
   - **Offset-based pages**: Firestore has no efficient offset, and offsets shift as messages arrive. Rejected.
   - **`startAfterDocument`**: rejected only because of the domain-purity rule above; functionally equivalent.
+
+### D18. Sign-out cleanup of the Firestore cache (rev. 5, option A, FR-014b, FR-052)
+
+Owner decision 2026-11-02: keep Firestore persistence (offline reading after restart stays, existing features
+unchanged) and wipe it on sign-out with `terminate()` + `clearPersistence()`; warn before losing unsynced writes.
+
+**Verified facts (cloud_firestore 6.1.0, `pubspec.lock`; plugin source in the local pub cache)**
+
+| Fact | Evidence | Consequence |
+|---|---|---|
+| Persistence is on today (Android default, 100 MB); no `Settings` are set anywhere | `injection_container.dart`, `main.dart`; `FlutterFirebaseFirestorePlugin.getSettingsFromPigeon` | Previous user's documents stay on disk after `signOut()` |
+| `terminate()` terminates the native instance **and removes it from the plugin cache**; the next call builds a new native instance with the same settings | `FlutterFirebaseFirestorePlugin.java` `terminate` (L435–449), `getFirestoreFromPigeon` (L318–336) | The Dart `FirebaseFirestore.instance` held by GetIt stays usable after cleanup; no DI re-registration. **To be confirmed on a device (task)** because the generic API doc says other methods throw after `terminate` |
+| `clearPersistence()` only works on an instance that has not started | `firestore.dart` doc (L95–107) | **No** Firestore call may happen between `terminate()` and `clearPersistence()`; otherwise it fails with `failed-precondition` |
+| `clearPersistence()` deletes files but does not securely overwrite them | same doc | FR-014b ("not shown") is met; forensic erasure is out of scope and documented |
+| `terminate()` does not cancel pending writes; `clearPersistence()` drops them | `firestore.dart` doc (L293–309) | Pending writes must be detected **before** cleanup |
+| `waitForPendingWrites()` resolves when all current writes are acknowledged, and **immediately when there are none**, online or offline | `firestore.dart` doc (L311–314) | Reliable pending-write detection that does not depend on connectivity |
+| Chat sends use transactions, which never queue offline | D4 | Chat messages are never "pending writes"; queued writes come from existing features (`set`/`update`/`add` in favorites, profile, cars, ads) and chat `update`s (mark read, clear) |
+| Sign-out today: `HomeRemoteDataSource.logOut()` = `auth.signOut()` only; `SplashBloc` (auth stream) switches `AppRoot` to `LoginScreen`, which disposes `HomeLayout` and all its blocs | `home_remote_datasource.dart`, `splash_bloc.dart`, `app_root.dart` | Bloc disposal happens **after** sign-out, too late to stop listeners before cleanup |
+| User data kept outside Firestore: `CacheHelper` holds only `intro_seen`; `FavoriteRepositoryImpl._cachedIds` is reset by `FavoriteBloc._onStarted` (`refresh()`) before any display | `cache_keys.dart`, `favorite_repository_impl.dart`, `favorite_bloc.dart` | No extra clearing needed for `CacheHelper`; favorites cache already safe |
+| Firestore is used directly by 7 data classes: auth, cars, favorite, feeds, home, profile datasources and `SearchRepositoryImpl` | `grep FirebaseFirestore lib/` | All of them must respect the session gate below |
+
+**Design**
+
+1. **`SessionGate`** (`lib/core/session/session_gate.dart`, plain Dart, no Firebase): states `open`, `closing`,
+   `wipePending`.
+   - `Future<T> run<T>(Future<T> Function() op)`: every Firestore future in every data class goes through it. When the
+     gate is not `open` it throws `AppException(type: ErrorType.auth, message: 'Signing out, please wait')` (or, in
+     `wipePending`, first tries `retryWipe` once and continues only if it succeeds). It counts in-flight operations.
+   - `Stream<T> watch<T>(Stream<T> Function() open)`: every Firestore stream goes through it; the gate keeps the
+     subscriptions so it can cancel them.
+   - `Future<void> closeForSignOut()`: state → `closing` (new operations rejected), cancels every registered stream
+     (the bloc subscriptions receive *done*, not an error), then waits for in-flight operations (max 5 s; after that
+     they are abandoned and fail harmlessly once the instance is terminated).
+   - `Future<void> Function()? retryWipe`: set at DI time to the home datasource's wipe method.
+   - `open()` after a successful wipe.
+2. **Pending-write check before sign-out** (`HasPendingWrites` use case → `HomeRemoteDataSource.hasPendingWrites()`):
+   `waitForPendingWrites().timeout(3 s)`; completes → no unsynced writes; times out → unsynced writes exist. A slow
+   network can produce a false "unsynced" warning, never a missed one (safe side).
+3. **Sign-out sequence** (`HomeRemoteDataSource.logOut()`, after the user confirmed if needed):
+   1. `sessionGate.closeForSignOut()` (streams cancelled, no new operations, in-flight drained)
+   2. `CacheHelper` marker `firestore_wipe_pending = true`
+   3. `firestore.terminate()`
+   4. `firestore.clearPersistence()`
+   5. marker removed
+   6. `auth.signOut()` (last, so listeners never see a signed-out state → no `permission-denied`)
+   7. `sessionGate.open()`
+   - If step 3 or 4 fails: the marker stays, the gate goes to `wipePending`, and `auth.signOut()` still runs (the
+     session ends). While `wipePending`, every Firestore operation first retries the wipe through `retryWipe` and is
+     refused with `AppException(type: ErrorType.cache, message: 'Previous session data could not be cleared. Please
+     try again.')` if it fails again. Sign-in calls `AuthRemoteDatasource`, which goes through the gate too, so a new
+     user cannot reach Firestore before the wipe succeeds.
+4. **Startup completion** (`CompletePendingSignOut` use case, called in `main.dart` after `init()` and **before
+   `runApp`**, so before any Firestore access): if the marker is set → `terminate()` (harmless on an unstarted
+   instance) → `clearPersistence()` → remove marker → `auth.signOut()` (completes a sign-out that was interrupted,
+   e.g. app killed) → gate `open`; on failure the marker stays, the gate starts in `wipePending` **and
+   `auth.signOut()` still runs**, so the interrupted sign-out is always completed (same rule as step 3).
+5. **No `permission-denied` after sign-out**: listeners are cancelled in step 3.1, before `signOut()`. As a second
+   line, the chat datasource's stream error mapping closes the stream when an **explicit check**
+   (`!sessionGate.isOpen || auth.currentUser == null`) says the session has ended; every other error is mapped with
+   `ErrorMapper.map` and shown (no bare `catch`, constitution III). Blocs treat stream *done* as no-op.
+6. **UI during sign-out**: `HomeBloc` emits `isSigningOut: true`; `HomeLayout` replaces its body with a blocking
+   progress view, so no new user action starts Firestore work. `HomeBloc` checks `isClosed` before emitting after
+   the sign-out (the auth stream disposes `HomeLayout`).
+7. **Warning dialog (FR-052)**: `LogoutPressed` → `HasPendingWrites`; if true → state `showUnsyncedWarning` →
+   `BlocListener` shows "Some changes haven't been saved to the server yet and will be lost. Log out anyway?" with
+   **Cancel** (`LogoutCancelled`, stays signed in) and **Log out** (`LogoutConfirmed`). If false → sign-out directly.
+
+**Alternatives considered**: B (persistence off) rejected by the owner (breaks offline reading after restart,
+FR-014b, and changes existing screens); wiping inside `logOut()` without a gate (listeners and in-flight calls can
+restart the instance between `terminate` and `clearPersistence`); wiping after `signOut()` (listeners first receive
+`permission-denied`, and the login screen is already usable).
