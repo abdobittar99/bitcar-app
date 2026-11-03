@@ -1,3 +1,4 @@
+import 'package:car_shop/entities/message.dart';
 import 'package:car_shop/features/chat/data/datasource/chat_remote_datasource.dart';
 import 'package:car_shop/features/chat/domain/model/chat_target.dart';
 import 'package:car_shop/features/chat/domain/model/conversations_update.dart';
@@ -21,8 +22,14 @@ class ChatRepositoryImpl implements ChatRepository {
   }
 
   @override
-  Future<ChatTarget> openChatWith({required String otherUserId}) {
-    throw UnimplementedError('openChatWith: T032/T035');
+  Future<ChatTarget> openChatWith({required String otherUserId}) async {
+    final r = await dataSource.openChatWith(otherUserId);
+    return ChatTarget(
+      conversationId: r.conversationId,
+      otherUserId: r.otherUserId,
+      otherUserName: r.otherUserName,
+      exists: r.exists,
+    );
   }
 
   @override
@@ -40,7 +47,17 @@ class ChatRepositoryImpl implements ChatRepository {
     required String conversationId,
     required int pageSize,
   }) {
-    throw UnimplementedError('watchLatestMessages: T034/T035');
+    return dataSource
+        .watchLatestMessages(conversationId, pageSize)
+        .map(
+          (r) => MessagesUpdate(
+            messages: List<MessageEntity>.unmodifiable(r.messages),
+            otherLastReadAt: r.otherLastReadAt,
+            unreadCount: r.unreadCount,
+            clearedAt: r.clearedAt,
+            isFromCache: r.isFromCache,
+          ),
+        );
   }
 
   @override
@@ -55,7 +72,7 @@ class ChatRepositoryImpl implements ChatRepository {
 
   @override
   String newMessageId(String conversationId) {
-    throw UnimplementedError('newMessageId: T033/T035');
+    return dataSource.newMessageId(conversationId);
   }
 
   @override
@@ -65,7 +82,12 @@ class ChatRepositoryImpl implements ChatRepository {
     required String otherUserId,
     required String text,
   }) {
-    throw UnimplementedError('sendMessage: T033/T035');
+    return dataSource.sendMessage(
+      conversationId: conversationId,
+      messageId: messageId,
+      otherUserId: otherUserId,
+      text: text,
+    );
   }
 
   @override

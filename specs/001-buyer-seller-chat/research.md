@@ -388,9 +388,21 @@ unchanged) and wipe it on sign-out with `terminate()` + `clearPersistence()`; wa
    e.g. app killed) → gate `open`; on failure the marker stays, the gate starts in `wipePending` **and
    `auth.signOut()` still runs**, so the interrupted sign-out is always completed (same rule as step 3).
 5. **No `permission-denied` after sign-out**: listeners are cancelled in step 3.1, before `signOut()`. As a second
-   line, the chat datasource's stream error mapping closes the stream when an **explicit check**
-   (`!sessionGate.isOpen || auth.currentUser == null`) says the session has ended; every other error is mapped with
-   `ErrorMapper.map` and shown (no bare `catch`, constitution III). Blocs treat stream *done* as no-op.
+   line, every chat stream goes through `ChatRemoteDataSource._watchGuarded` (which wraps `sessionGate.watch`), and
+   its error handling decides with an **explicit check** (no bare `catch`, constitution III), approved 2026-11-03:
+
+   | Situation when a stream error arrives | Result |
+   |---|---|
+   | Gate state `closing` (sign-out in progress) | stream closed quietly (*done*), nothing shown |
+   | No signed-in user (`auth.currentUser == null`) | stream closed quietly (*done*), nothing shown |
+   | Gate state `wipePending` **and** a signed-in user | error shown: `AppException(type: ErrorType.cache, message: 'Previous session data could not be cleared. Please try again.')`; no data is loaded |
+   | Any other error | mapped with `ErrorMapper.map` and shown |
+
+   The check is `sessionGate.state == SessionGateState.closing || auth.currentUser == null`. It is intentionally not
+   `!sessionGate.isOpen`: that would also close streams quietly in `wipePending`, so a user who signs in after a
+   failed wipe would see an empty screen without explanation. Blocs treat stream *done* as no-op.
+   The helper became private (`_watchGuarded`) at T034, once `watchLatestMessages` used it; T057 uses it the same
+   way from inside the datasource.
 6. **UI during sign-out**: `HomeBloc` emits `isSigningOut: true`; `HomeLayout` replaces its body with a blocking
    progress view, so no new user action starts Firestore work. `HomeBloc` checks `isClosed` before emitting after
    the sign-out (the auth stream disposes `HomeLayout`).

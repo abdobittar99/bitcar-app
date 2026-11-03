@@ -12,8 +12,13 @@ import 'package:car_shop/features/car/car_details/bloc/car_details_bloc.dart';
 import 'package:car_shop/features/chat/data/datasource/chat_remote_datasource.dart';
 import 'package:car_shop/features/chat/data/repositories/chat_repository_impl.dart';
 import 'package:car_shop/features/chat/domain/repositories/chat_repository.dart';
+import 'package:car_shop/features/chat/chat_room/bloc/chat_bloc.dart';
+import 'package:car_shop/features/chat/domain/usecase/create_message_id.dart';
 import 'package:car_shop/features/chat/domain/usecase/get_current_user_id.dart';
+import 'package:car_shop/features/chat/domain/usecase/open_chat_with_seller.dart';
+import 'package:car_shop/features/chat/domain/usecase/send_message.dart';
 import 'package:car_shop/features/chat/domain/usecase/sync_public_profile.dart';
+import 'package:car_shop/features/chat/domain/usecase/watch_latest_messages.dart';
 import 'package:car_shop/features/car/domain/usecase/get_car_details.dart';
 import 'package:car_shop/features/car/car_form/bloc/car_form_bloc.dart';
 import 'package:car_shop/features/car/domain/usecase/add_car.dart';
@@ -136,7 +141,11 @@ Future<void> init() async {
   );
 
   sl.registerFactory(
-    () => CarDetailsBloc(getCarDetails: sl(), appErrorCubit: sl()),
+    () => CarDetailsBloc(
+      getCarDetails: sl(),
+      getCurrentUser: sl(),
+      appErrorCubit: sl(),
+    ),
   );
 
   sl.registerFactory(
@@ -206,4 +215,19 @@ Future<void> init() async {
   sl.registerLazySingleton<ChatRepository>(() => ChatRepositoryImpl(sl()));
   sl.registerLazySingleton(() => GetCurrentUserId(sl()));
   sl.registerLazySingleton(() => SyncPublicProfile(sl()));
+  sl.registerLazySingleton(() => OpenChatWithSeller(sl()));
+  sl.registerLazySingleton(() => CreateMessageId(sl()));
+  sl.registerLazySingleton(() => SendMessage(sl()));
+  sl.registerLazySingleton(() => WatchLatestMessages(sl()));
+
+  sl.registerFactory(
+    () => ChatBloc(
+      openChatWithSeller: sl(),
+      watchLatestMessages: sl(),
+      createMessageId: sl(),
+      sendMessage: sl(),
+      getCurrentUserId: sl(),
+      appErrorCubit: sl(),
+    ),
+  );
 }

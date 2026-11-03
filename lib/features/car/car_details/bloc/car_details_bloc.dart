@@ -3,13 +3,18 @@ import 'package:car_shop/core/errors/exception.dart';
 import 'package:car_shop/features/car/car_details/bloc/car_details_event.dart';
 import 'package:car_shop/features/car/car_details/bloc/car_details_state.dart';
 import 'package:car_shop/features/car/domain/usecase/get_car_details.dart';
+import 'package:car_shop/features/home/domain/usecase/get_current_user.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 class CarDetailsBloc extends Bloc<CarDetailsEvent, CarDetailsState> {
   final GetCarDetails getCarDetails;
+  final GetCurrentUser getCurrentUser;
   final AppErrorCubit appErrorCubit;
-  CarDetailsBloc({required this.getCarDetails, required this.appErrorCubit})
-    : super(const CarDetailsState()) {
+  CarDetailsBloc({
+    required this.getCarDetails,
+    required this.getCurrentUser,
+    required this.appErrorCubit,
+  }) : super(const CarDetailsState()) {
     on<CarDetailsStarted>(_onStarted);
   }
   Future<void> _onStarted(
@@ -24,6 +29,16 @@ class CarDetailsBloc extends Bloc<CarDetailsEvent, CarDetailsState> {
     } on AppException catch (e) {
       appErrorCubit.showError(e.message);
       emit(state.copyWith(isLoading: false));
+      return;
+    }
+
+    // Loaded separately so a failure here never hides the car; without a user id the
+    // "Chat with Seller" button stays hidden.
+    try {
+      final user = await getCurrentUser();
+      emit(state.copyWith(currentUserId: user.id));
+    } on AppException catch (e) {
+      appErrorCubit.showError(e.message);
     }
   }
 }
