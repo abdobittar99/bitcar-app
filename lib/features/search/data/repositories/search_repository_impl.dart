@@ -1,3 +1,4 @@
+import 'package:car_shop/core/session/session_gate.dart';
 import 'package:car_shop/models/car_model.dart';
 import 'package:car_shop/features/search/domain/model/result_wrapper.dart';
 import 'package:car_shop/features/search/domain/model/search_page.dart';
@@ -6,7 +7,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 class SearchRepositoryImpl implements SearchRepository {
   final FirebaseFirestore firestore;
-  SearchRepositoryImpl(this.firestore);
+  final SessionGate sessionGate;
+  SearchRepositoryImpl(this.firestore, this.sessionGate);
 
   @override
   Future<SearchResult> search(SearchParams params) async {
@@ -72,7 +74,7 @@ class SearchRepositoryImpl implements SearchRepository {
       q = q.startAfterDocument(params.lastDoc!);
     }
 
-    final snap = await q.get();
+    final snap = await sessionGate.run(() => q.get());
 
     final cars = snap.docs
         .map((d) => CarModel.fromMap(d.data() as Map<String, dynamic>, d.id))

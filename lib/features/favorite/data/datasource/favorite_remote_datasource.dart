@@ -1,6 +1,7 @@
 import 'package:car_shop/core/enums/error_type.dart';
 import 'package:car_shop/core/errors/mapper/error_mapper.dart';
 import 'package:car_shop/core/errors/exception.dart';
+import 'package:car_shop/core/session/session_gate.dart';
 import 'package:car_shop/core/utils/list_utils.dart';
 import 'package:car_shop/models/car_model.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -9,15 +10,18 @@ import 'package:firebase_auth/firebase_auth.dart';
 class FavoriteRemoteDataSource {
   final FirebaseFirestore firestore;
   final FirebaseAuth auth;
+  final SessionGate sessionGate;
 
-  FavoriteRemoteDataSource(this.firestore, this.auth);
+  FavoriteRemoteDataSource(this.firestore, this.auth, this.sessionGate);
   Future<Set<String>> getFavoriteIds() async {
     try {
-      final snapshot = await firestore
-          .collection('users')
-          .doc(uid)
-          .collection('favorites')
-          .get();
+      final snapshot = await sessionGate.run(
+        () => firestore
+            .collection('users')
+            .doc(uid)
+            .collection('favorites')
+            .get(),
+      );
 
       return snapshot.docs.map((d) => d.id).toSet();
     } catch (e) {
@@ -33,11 +37,13 @@ class FavoriteRemoteDataSource {
     Set<String> foundIds = {};
 
     for (final chunk in chunks) {
-      final snapshot = await firestore
-          .collection('cars')
-          .where(FieldPath.documentId, whereIn: chunk)
-          .orderBy('createdAt', descending: true)
-          .get();
+      final snapshot = await sessionGate.run(
+        () => firestore
+            .collection('cars')
+            .where(FieldPath.documentId, whereIn: chunk)
+            .orderBy('createdAt', descending: true)
+            .get(),
+      );
 
       final cars = snapshot.docs
           .map((d) => CarModel.fromMap(d.data(), d.id))
@@ -65,7 +71,7 @@ class FavoriteRemoteDataSource {
         batch.delete(ref);
       }
 
-      await batch.commit();
+      await sessionGate.run(() => batch.commit());
     }
     return allCars;
   }
@@ -80,12 +86,14 @@ class FavoriteRemoteDataSource {
 
   Future<void> addFavorite(String carId) async {
     try {
-      await firestore
-          .collection('users')
-          .doc(uid)
-          .collection('favorites')
-          .doc(carId)
-          .set({'createdAt': FieldValue.serverTimestamp()});
+      await sessionGate.run(
+        () => firestore
+            .collection('users')
+            .doc(uid)
+            .collection('favorites')
+            .doc(carId)
+            .set({'createdAt': FieldValue.serverTimestamp()}),
+      );
     } catch (e) {
       throw ErrorMapper.map(e);
     }
@@ -93,12 +101,14 @@ class FavoriteRemoteDataSource {
 
   Future<void> removeFavorite(String carId) async {
     try {
-      await firestore
-          .collection('users')
-          .doc(uid)
-          .collection('favorites')
-          .doc(carId)
-          .delete();
+      await sessionGate.run(
+        () => firestore
+            .collection('users')
+            .doc(uid)
+            .collection('favorites')
+            .doc(carId)
+            .delete(),
+      );
     } catch (e) {
       throw ErrorMapper.map(e);
     }

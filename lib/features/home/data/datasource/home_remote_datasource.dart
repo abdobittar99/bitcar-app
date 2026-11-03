@@ -1,6 +1,7 @@
 import 'package:car_shop/core/enums/error_type.dart';
 import 'package:car_shop/core/errors/mapper/error_mapper.dart';
 import 'package:car_shop/core/errors/exception.dart';
+import 'package:car_shop/core/session/session_gate.dart';
 import 'package:car_shop/models/user_model.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -8,8 +9,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 class HomeRemoteDataSource {
   final FirebaseAuth auth;
   final FirebaseFirestore firestore;
+  final SessionGate sessionGate;
 
-  HomeRemoteDataSource(this.auth, this.firestore);
+  HomeRemoteDataSource(this.auth, this.firestore, this.sessionGate);
 
   Future<AppUserModel> getCurrentUser() async {
     try {
@@ -22,7 +24,9 @@ class HomeRemoteDataSource {
         );
       }
 
-      final doc = await firestore.collection('users').doc(user.uid).get();
+      final doc = await sessionGate.run(
+        () => firestore.collection('users').doc(user.uid).get(),
+      );
 
       if (!doc.exists) {
         throw AppException(

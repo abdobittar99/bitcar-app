@@ -1,5 +1,6 @@
 import 'package:car_shop/core/errors/bloc/app_error_cubit.dart';
 import 'package:car_shop/core/image_source/image_source.dart';
+import 'package:car_shop/core/session/session_gate.dart';
 import 'package:car_shop/features/auth/data/datasource/auth_remote_datasource.dart';
 import 'package:car_shop/features/auth/data/repositories/auth_repository_impl.dart';
 import 'package:car_shop/features/auth/domain/repositories/auth_repository.dart';
@@ -59,6 +60,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 final sl = GetIt.instance;
 
 Future<void> init() async {
+  // Session gate: every Firestore call goes through it (sign-out cleanup, research D18)
+  sl.registerLazySingleton(() => SessionGate());
+
   // External
   sl.registerLazySingleton(() => FirebaseAuth.instance);
   sl.registerLazySingleton(() => FirebaseFirestore.instance);
@@ -66,7 +70,7 @@ Future<void> init() async {
   sl.registerLazySingleton<AppErrorCubit>(() => AppErrorCubit());
 
   // Home Layout
-  sl.registerLazySingleton(() => HomeRemoteDataSource(sl(), sl()));
+  sl.registerLazySingleton(() => HomeRemoteDataSource(sl(), sl(), sl()));
 
   sl.registerLazySingleton<HomeRepository>(() => HomeRepositoryImpl(sl()));
 
@@ -77,7 +81,7 @@ Future<void> init() async {
     () => HomeBloc(loggout: sl(), getCurrentUser: sl(), appErrorCubit: sl()),
   );
   // Feeds
-  sl.registerLazySingleton(() => FeedsRemoteDataSource(sl()));
+  sl.registerLazySingleton(() => FeedsRemoteDataSource(sl(), sl()));
   sl.registerLazySingleton<FeedsRepository>(() => FeedsRepositoryImpl(sl()));
   sl.registerLazySingleton(() => AddAd(sl()));
   sl.registerLazySingleton(() => GetAds(sl()));
@@ -94,7 +98,7 @@ Future<void> init() async {
 
   // Auth
 
-  sl.registerLazySingleton(() => AuthRemoteDatasource(sl(), sl()));
+  sl.registerLazySingleton(() => AuthRemoteDatasource(sl(), sl(), sl()));
   sl.registerLazySingleton<AuthRepository>(() => AuthRepositoryImpl(sl()));
   sl.registerLazySingleton(() => Register(sl()));
   sl.registerLazySingleton(() => Login(sl()));
@@ -104,7 +108,7 @@ Future<void> init() async {
   sl.registerFactory(() => RegisterBloc(register: sl(), appErrorCubit: sl()));
 
   // Cars
-  sl.registerLazySingleton(() => CarsRemoteDataSource(sl(), sl()));
+  sl.registerLazySingleton(() => CarsRemoteDataSource(sl(), sl(), sl()));
   sl.registerLazySingleton<CarsRepository>(() => CarsRepositoryImpl(sl()));
   sl.registerLazySingleton(() => AddCar(sl()));
   sl.registerLazySingleton(() => UpdateCarDetails(sl()));
@@ -150,7 +154,7 @@ Future<void> init() async {
   );
 
   // Favorite
-  sl.registerLazySingleton(() => FavoriteRemoteDataSource(sl(), sl()));
+  sl.registerLazySingleton(() => FavoriteRemoteDataSource(sl(), sl(), sl()));
 
   sl.registerLazySingleton<FavoriteRepository>(
     () => FavoriteRepositoryImpl(sl(), sl()),
@@ -172,14 +176,14 @@ Future<void> init() async {
   );
 
   // Search
-  sl.registerLazySingleton<SearchRepository>(() => SearchRepositoryImpl(sl()));
+  sl.registerLazySingleton<SearchRepository>(() => SearchRepositoryImpl(sl(), sl()));
 
   sl.registerFactory(
     () => SearchBloc(appErrorCubit: sl(), repo: sl(), adminDeleteCar: sl()),
   );
 
   // profile
-  sl.registerLazySingleton(() => UserRemoteDatasource(sl(), sl()));
+  sl.registerLazySingleton(() => UserRemoteDatasource(sl(), sl(), sl()));
   sl.registerLazySingleton<ProfileRepository>(() => UserRepositoryImpl(sl()));
   sl.registerLazySingleton(() => GetUserProfile(sl()));
   sl.registerLazySingleton(() => UpdateUserProfile(sl()));
