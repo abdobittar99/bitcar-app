@@ -9,6 +9,11 @@ import 'package:car_shop/features/auth/domain/usecase/register.dart';
 import 'package:car_shop/features/auth/login/bloc/login_bloc.dart';
 import 'package:car_shop/features/auth/register/bloc/register_bloc.dart';
 import 'package:car_shop/features/car/car_details/bloc/car_details_bloc.dart';
+import 'package:car_shop/features/chat/data/datasource/chat_remote_datasource.dart';
+import 'package:car_shop/features/chat/data/repositories/chat_repository_impl.dart';
+import 'package:car_shop/features/chat/domain/repositories/chat_repository.dart';
+import 'package:car_shop/features/chat/domain/usecase/get_current_user_id.dart';
+import 'package:car_shop/features/chat/domain/usecase/sync_public_profile.dart';
 import 'package:car_shop/features/car/domain/usecase/get_car_details.dart';
 import 'package:car_shop/features/car/car_form/bloc/car_form_bloc.dart';
 import 'package:car_shop/features/car/domain/usecase/add_car.dart';
@@ -195,4 +200,10 @@ Future<void> init() async {
       updateUserProfile: sl(),
     ),
   );
+
+  // Chat
+  sl.registerLazySingleton(() => ChatRemoteDataSource(sl(), sl(), sl()));
+  sl.registerLazySingleton<ChatRepository>(() => ChatRepositoryImpl(sl()));
+  sl.registerLazySingleton(() => GetCurrentUserId(sl()));
+  sl.registerLazySingleton(() => SyncPublicProfile(sl()));
 }
