@@ -13,8 +13,12 @@ import 'package:car_shop/features/chat/data/datasource/chat_remote_datasource.da
 import 'package:car_shop/features/chat/data/repositories/chat_repository_impl.dart';
 import 'package:car_shop/features/chat/domain/repositories/chat_repository.dart';
 import 'package:car_shop/features/chat/chat_room/bloc/chat_bloc.dart';
+import 'package:car_shop/features/chat/conversations/bloc/conversations_bloc.dart';
 import 'package:car_shop/features/chat/domain/usecase/create_message_id.dart';
+import 'package:car_shop/features/chat/domain/usecase/fill_own_placeholder_name.dart';
+import 'package:car_shop/features/chat/domain/usecase/get_chat_target.dart';
 import 'package:car_shop/features/chat/domain/usecase/get_current_user_id.dart';
+import 'package:car_shop/features/chat/domain/usecase/watch_conversations.dart';
 import 'package:car_shop/features/chat/domain/usecase/load_older_messages.dart';
 import 'package:car_shop/features/chat/domain/usecase/mark_conversation_read.dart';
 import 'package:car_shop/features/chat/domain/usecase/open_chat_with_seller.dart';
@@ -209,6 +213,7 @@ Future<void> init() async {
       appErrorCubit: sl(),
       getUserProfile: sl(),
       updateUserProfile: sl(),
+      syncPublicProfile: sl(),
     ),
   );
 
@@ -223,10 +228,25 @@ Future<void> init() async {
   sl.registerLazySingleton(() => WatchLatestMessages(sl()));
   sl.registerLazySingleton(() => LoadOlderMessages(sl()));
   sl.registerLazySingleton(() => MarkConversationRead(sl()));
+  sl.registerLazySingleton(() => WatchConversations(sl()));
+  sl.registerLazySingleton(() => GetChatTarget(sl()));
+  sl.registerLazySingleton(() => FillOwnPlaceholderName(sl()));
+
+  sl.registerFactory(
+    () => ConversationsBloc(
+      getCurrentUser: sl(),
+      getCurrentUserId: sl(),
+      syncPublicProfile: sl(),
+      watchConversations: sl(),
+      appErrorCubit: sl(),
+    ),
+  );
 
   sl.registerFactory(
     () => ChatBloc(
       openChatWithSeller: sl(),
+      getChatTarget: sl(),
+      fillOwnPlaceholderName: sl(),
       watchLatestMessages: sl(),
       loadOlderMessages: sl(),
       createMessageId: sl(),

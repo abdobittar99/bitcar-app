@@ -50,7 +50,7 @@ Firestore emulator (`firebase emulators:exec`, `demo-bitcar` project id); manual
 read-only offline; 1–1,000 chars; ≤ 20 messages/min/user; no Firebase imports above the data layer; no new pub
 packages; deploy only `firestore:rules,firestore:indexes`
 
-**Scale/Scope**: 2 new screens, 2 blocs, 1 feature module (`features/chat`), 12 use cases, 4 Firestore paths, 1 rules
+**Scale/Scope**: 2 new screens, 2 blocs, 1 feature module (`features/chat`), 13 use cases, 4 Firestore paths, 1 rules
 test package; small changes to existing app files (entry points, profile sync, sign-out cleanup across the 7 Firestore
 data classes) + 3 Firebase config files; 1 obsolete test deleted. Messages load 20 at a time (FR-037)
 
@@ -128,7 +128,7 @@ specs/001-buyer-seller-chat/
 ├── quickstart.md           # Validation guide (Q1–Q22) + rules test commands
 ├── contracts/
 │   ├── firestore-security-rules.md     # Rules contract, audit E1–E13, tests R1–R20
-│   ├── chat-repository.md              # Domain contract + 12 use cases
+│   ├── chat-repository.md              # Domain contract + 13 use cases
 │   ├── ui-screens-and-blocs.md         # Screens, navigation, bloc events/states
 │   └── future-push-notifications.md    # Deferred design note (not implemented)
 ├── checklists/requirements.md
@@ -198,7 +198,7 @@ Modified files:
 
 | File | Change |
 |---|---|
-| `lib/core/di/injection_container.dart` | Register `ChatRemoteDataSource`, `ChatRepository`, 12 use cases, `ConversationsBloc` and `ChatBloc` factories; add `getCurrentUser` to `CarDetailsBloc`; add `syncPublicProfile` to `ProfileBloc` |
+| `lib/core/di/injection_container.dart` | Register `ChatRemoteDataSource`, `ChatRepository`, 13 use cases, `ConversationsBloc` and `ChatBloc` factories; add `getCurrentUser` to `CarDetailsBloc`; add `syncPublicProfile` to `ProfileBloc` |
 | `lib/features/profile/bloc/profile_bloc.dart` | Inject `SyncPublicProfile`; call it after a successful name change (best effort, error via `AppErrorCubit`) |
 | `lib/features/home/ui/home_layout.dart` | Provide `ConversationsBloc`; app-bar chat icon with red dot (`BlocBuilder`) |
 | `lib/features/car/car_details/bloc/car_details_{bloc,state}.dart` | Inject existing `GetCurrentUser`; expose `currentUserId` |

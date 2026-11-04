@@ -7,6 +7,10 @@ import 'package:car_shop/features/car/cars_list/bloc/cars_list_bloc.dart';
 import 'package:car_shop/features/car/cars_list/bloc/cars_list_event.dart';
 import 'package:car_shop/features/car/my_cars/bloc/my_cars_bloc.dart';
 import 'package:car_shop/features/car/my_cars/bloc/my_cars_event.dart';
+import 'package:car_shop/features/chat/conversations/bloc/conversations_bloc.dart';
+import 'package:car_shop/features/chat/conversations/bloc/conversations_event.dart';
+import 'package:car_shop/features/chat/conversations/bloc/conversations_state.dart';
+import 'package:car_shop/features/chat/conversations/ui/conversations_screen.dart';
 import 'package:car_shop/features/compare/bloc/compare_bloc.dart';
 import 'package:car_shop/features/favorite/bloc/favorite_bloc.dart';
 import 'package:car_shop/features/favorite/bloc/favorite_event.dart';
@@ -44,6 +48,9 @@ class HomeLayout extends StatelessWidget {
 
         BlocProvider(create: (_) => sl<ProfileBloc>()..add(ProfileRequested())),
         BlocProvider(create: (_) => sl<MyCarsBloc>()..add(MyCarsStarted())),
+        BlocProvider(
+          create: (_) => sl<ConversationsBloc>()..add(ConversationsStarted()),
+        ),
       ],
       child: BlocConsumer<HomeBloc, HomeState>(
         listener: (context, state) {},
@@ -107,6 +114,47 @@ class HomeLayout extends StatelessWidget {
               ),
 
               actions: [
+                BlocBuilder<ConversationsBloc, ConversationsState>(
+                  builder: (context, conversationsState) {
+                    return IconButton(
+                      tooltip: 'Conversations',
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => BlocProvider.value(
+                              value: context.read<ConversationsBloc>(),
+                              child: const ConversationsScreen(),
+                            ),
+                          ),
+                        );
+                      },
+                      icon: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          const Icon(Icons.chat_bubble_outline),
+                          if (conversationsState.totalUnread > 0)
+                            Positioned(
+                              top: -2,
+                              right: -2,
+                              child: Semantics(
+                                label: 'Unread messages',
+                                child: Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.red,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      color: const Color.fromARGB(255, 1, 37, 90),
+                    );
+                  },
+                ),
                 IconButton(
                   onPressed: () {
                     Navigator.push(

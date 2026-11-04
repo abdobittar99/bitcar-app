@@ -14,6 +14,8 @@ import 'package:car_shop/features/chat/domain/model/message_cursor.dart';
 import 'package:car_shop/features/chat/domain/model/messages_page.dart';
 import 'package:car_shop/features/chat/domain/model/messages_update.dart';
 import 'package:car_shop/features/chat/domain/usecase/create_message_id.dart';
+import 'package:car_shop/features/chat/domain/usecase/fill_own_placeholder_name.dart';
+import 'package:car_shop/features/chat/domain/usecase/get_chat_target.dart';
 import 'package:car_shop/features/chat/domain/usecase/get_current_user_id.dart';
 import 'package:car_shop/features/chat/domain/usecase/load_older_messages.dart';
 import 'package:car_shop/features/chat/domain/usecase/mark_conversation_read.dart';
@@ -119,6 +121,8 @@ ChatBloc buildBloc(
 }) {
   return ChatBloc(
     openChatWithSeller: OpenChatWithSeller(repo),
+    getChatTarget: GetChatTarget(repo),
+    fillOwnPlaceholderName: FillOwnPlaceholderName(repo),
     watchLatestMessages: WatchLatestMessages(repo),
     loadOlderMessages: LoadOlderMessages(repo),
     createMessageId: CreateMessageId(repo),
@@ -386,6 +390,116 @@ void main() {
 
       expect(errors.state, 'No internet connection');
       expect(bloc.state.isLoading, isFalse);
+    });
+
+    group('fromConversation', () {
+      ChatTarget placeholderTarget() => ChatTarget(
+        conversationId: 'alice_seller',
+        otherUserId: 'seller',
+        otherUserName: 'Sam Seller',
+        exists: true,
+        ownNameIsPlaceholder: true,
+      );
+
+      test('uses GetChatTarget, leaves the draft empty and subscribes (FR-009)', () async {
+        bloc.add(ChatStarted.fromConversation('alice_seller'));
+        await settle();
+
+        expect(repo.calls['getChatTarget'], [
+          ['alice_seller'],
+        ]);
+        expect(repo.callCount('openChatWith'), 0);
+        expect(bloc.state.draft, '');
+        expect(bloc.state.target?.conversationId, 'alice_seller');
+        expect(repo.calls['watchLatestMessages'], [
+          ['alice_seller', 20],
+        ]);
+      });
+
+      test('a notFound AppException is shown and nothing is subscribed', () async {
+        repo.errors['getChatTarget'] = AppException(
+          message: 'Conversation not found',
+          type: ErrorType.notFound,
+        );
+        bloc.add(ChatStarted.fromConversation('alice_seller'));
+        await settle();
+
+        expect(errors.shown, ['Conversation not found']);
+        expect(bloc.state.isLoading, isFalse);
+        expect(repo.callCount('watchLatestMessages'), 0);
+      });
+
+      test('no placeholder: the name fill is not called', () async {
+        bloc.add(ChatStarted.fromConversation('alice_seller'));
+        await settle();
+
+        expect(repo.callCount('fillOwnPlaceholderName'), 0);
+      });
+
+      test('a fill that never completes does not delay the subscription', () async {
+        repo.target = placeholderTarget();
+        repo.fillGate = Completer<void>();
+        bloc.add(ChatStarted.fromConversation('alice_seller'));
+        await settle();
+
+        expect(repo.callCount('fillOwnPlaceholderName'), 1);
+        expect(repo.callCount('watchLatestMessages'), 1);
+
+        repo.emitMessages(updateOf(range(1, 3)));
+        await settle();
+        expect(bloc.state.isLoading, isFalse);
+        expect(bloc.state.messages.length, 3);
+      });
+
+      test('a network error of the fill is not shown and the chat keeps working', () async {
+        repo.target = placeholderTarget();
+        repo.fillFailure = AppException(
+          message: 'Service temporarily unavailable',
+          type: ErrorType.network,
+        );
+        bloc.add(ChatStarted.fromConversation('alice_seller'));
+        await settle();
+        repo.emitMessages(updateOf(range(1, 3)));
+        await settle();
+
+        expect(errors.shown, isEmpty);
+        expect(bloc.state.messages.length, 3);
+        expect(bloc.state.canSend, isTrue);
+      });
+
+      test('any other error of the fill is shown once and the chat keeps working', () async {
+        repo.target = placeholderTarget();
+        repo.fillFailure = AppException(
+          message: 'You do not have permission to perform this action',
+          type: ErrorType.permission,
+        );
+        bloc.add(ChatStarted.fromConversation('alice_seller'));
+        await settle();
+        repo.emitMessages(updateOf(range(1, 3)));
+        await settle();
+
+        expect(errors.shown, ['You do not have permission to perform this action']);
+        expect(bloc.state.streamStatus, ChatStreamStatus.live);
+        expect(bloc.state.messages.length, 3);
+      });
+
+      test('a fill failing after the bloc is closed shows nothing and is not unhandled', () async {
+        repo.target = placeholderTarget();
+        repo.fillGate = Completer<void>();
+        repo.fillFailure = AppException(
+          message: 'You do not have permission to perform this action',
+          type: ErrorType.permission,
+        );
+        bloc.add(ChatStarted.fromConversation('alice_seller'));
+        await settle();
+
+        await bloc.close();
+        repo.fillGate!.complete();
+        await settle();
+
+        // An unhandled exception here would fail this test through the test zone.
+        expect(errors.shown, isEmpty);
+      });
     });
 
     test('close() cancels the live window subscription', () async {

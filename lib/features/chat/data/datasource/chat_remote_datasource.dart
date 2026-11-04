@@ -31,6 +31,19 @@ typedef OlderMessagesRecord = ({
   bool isFromCache,
 });
 
+typedef ConversationsRecord = ({
+  List<ConversationModel> conversations,
+  bool isFromCache,
+});
+
+typedef ChatTargetRecord = ({
+  String conversationId,
+  String otherUserId,
+  String otherUserName,
+  bool exists,
+  bool ownNameIsPlaceholder,
+});
+
 // The only chat class that talks to Firestore and Auth. Returns models (or records of models),
 // never domain types; ChatRepositoryImpl builds the domain wrappers (constitution I).
 class ChatRemoteDataSource {
@@ -64,6 +77,8 @@ class ChatRemoteDataSource {
       await sessionGate.run(() async {
         final ref = firestore.collection('publicProfiles').doc(currentUserId);
         final doc = await ref.get();
+        // From the cache: offline. A write here would stay queued; the next app open repeats this.
+        if (doc.metadata.isFromCache) return;
         if (doc.exists && doc.data()?['displayName'] == displayName) return;
         await ref.set({'displayName': displayName});
       });
@@ -116,6 +131,83 @@ class ChatRemoteDataSource {
       otherUserName: await readPublicName(otherUserId),
       exists: false,
     );
+  }
+
+  // Opening from the list: one read, no profile read and no write, so names never delay or
+  // block opening. Replacing an own placeholder is the separate fillOwnPlaceholderName.
+  Future<ChatTargetRecord> getChatTarget(String conversationId) async {
+    final uid = currentUserId;
+    try {
+      final doc = await sessionGate.run(
+        () => _conversation(conversationId).get(),
+      );
+      final data = doc.data();
+      if (data == null) {
+        throw AppException(
+          message: 'Conversation not found',
+          type: ErrorType.notFound,
+        );
+      }
+      final conversation = ConversationModel.fromMap(data, doc.id, uid);
+      final names = data['participantNames'] as Map<String, dynamic>? ?? {};
+      return (
+        conversationId: doc.id,
+        otherUserId: conversation.otherUserId,
+        otherUserName: conversation.otherUserName,
+        exists: true,
+        ownNameIsPlaceholder:
+            names[uid] == placeholderName && !doc.metadata.isFromCache,
+      );
+    } catch (e) {
+      throw ErrorMapper.map(e);
+    }
+  }
+
+  // Replaces only the caller's own placeholder with their public name (rules isFillOwnName).
+  // Without a public profile, or offline, there is nothing to write.
+  Future<void> fillOwnPlaceholderName(String conversationId) async {
+    final uid = currentUserId;
+    try {
+      await sessionGate.run(() async {
+        final profile = await firestore
+            .collection('publicProfiles')
+            .doc(uid)
+            .get();
+        final name = profile.data()?['displayName'] as String?;
+        if (name == null || profile.metadata.isFromCache) return;
+        await _conversation(
+          conversationId,
+        ).update({'participantNames.$uid': name});
+      });
+    } catch (e) {
+      throw ErrorMapper.map(e);
+    }
+  }
+
+  // The user's conversations, newest first (composite index on participants + lastMessageAt).
+  // Without a signed-in user no query runs: the error ends the stream quietly (_watchGuarded).
+  Stream<ConversationsRecord> watchConversations() {
+    return _watchGuarded(() {
+      final String uid;
+      try {
+        uid = currentUserId;
+      } on AppException catch (e) {
+        return Stream<ConversationsRecord>.error(e);
+      }
+      return firestore
+          .collection('conversations')
+          .where('participants', arrayContains: uid)
+          .orderBy('lastMessageAt', descending: true)
+          .snapshots(includeMetadataChanges: true)
+          .map(
+            (snap) => (
+              conversations: snap.docs
+                  .map((d) => ConversationModel.fromMap(d.data(), d.id, uid))
+                  .toList(),
+              isFromCache: snap.metadata.isFromCache,
+            ),
+          );
+    });
   }
 
   // Local id generation, no network.

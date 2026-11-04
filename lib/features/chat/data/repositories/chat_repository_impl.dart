@@ -33,13 +33,32 @@ class ChatRepositoryImpl implements ChatRepository {
   }
 
   @override
-  Future<ChatTarget> getChatTarget(String conversationId) {
-    throw UnimplementedError('getChatTarget: T057/T058');
+  Future<ChatTarget> getChatTarget(String conversationId) async {
+    final r = await dataSource.getChatTarget(conversationId);
+    return ChatTarget(
+      conversationId: r.conversationId,
+      otherUserId: r.otherUserId,
+      otherUserName: r.otherUserName,
+      exists: r.exists,
+      ownNameIsPlaceholder: r.ownNameIsPlaceholder,
+    );
+  }
+
+  @override
+  Future<void> fillOwnPlaceholderName(String conversationId) {
+    return dataSource.fillOwnPlaceholderName(conversationId);
   }
 
   @override
   Stream<ConversationsUpdate> watchConversations() {
-    throw UnimplementedError('watchConversations: T057/T058');
+    return dataSource.watchConversations().map(
+      (r) => ConversationsUpdate(
+        conversations: r.conversations
+            .where((c) => c.isVisibleInList)
+            .toList(),
+        isFromCache: r.isFromCache,
+      ),
+    );
   }
 
   @override

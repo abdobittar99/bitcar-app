@@ -5,8 +5,10 @@ import 'package:car_shop/core/enums/message_status.dart';
 import 'package:car_shop/core/errors/exception.dart';
 import 'package:car_shop/features/chat/data/datasource/chat_remote_datasource.dart';
 import 'package:car_shop/features/chat/data/repositories/chat_repository_impl.dart';
+import 'package:car_shop/features/chat/domain/model/conversations_update.dart';
 import 'package:car_shop/features/chat/domain/model/message_cursor.dart';
 import 'package:car_shop/features/chat/domain/model/messages_update.dart';
+import 'package:car_shop/models/conversation_model.dart';
 import 'package:car_shop/models/message_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -54,6 +56,29 @@ class _FakeDataSource implements ChatRemoteDataSource {
     watchCalls.add([conversationId, pageSize]);
     return controller.stream;
   }
+
+  ChatTargetRecord targetResult = (
+    conversationId: 'alice_seller',
+    otherUserId: 'seller',
+    otherUserName: 'Sam Seller',
+    exists: true,
+    ownNameIsPlaceholder: true,
+  );
+  final fillCalls = <String>[];
+  final conversationsController = StreamController<ConversationsRecord>();
+
+  @override
+  Future<ChatTargetRecord> getChatTarget(String conversationId) async =>
+      targetResult;
+
+  @override
+  Future<void> fillOwnPlaceholderName(String conversationId) async {
+    fillCalls.add(conversationId);
+  }
+
+  @override
+  Stream<ConversationsRecord> watchConversations() =>
+      conversationsController.stream;
 
   final olderCalls = <List<Object?>>[];
   final readCalls = <String>[];
@@ -180,6 +205,67 @@ void main() {
           ),
         ),
       );
+    });
+  });
+
+  group('conversations', () {
+    ConversationModel conversation(String id, {DateTime? at, DateTime? cleared}) {
+      return ConversationModel(
+        id: id,
+        participantIds: const ['alice', 'seller'],
+        buyerId: 'alice',
+        sellerId: 'seller',
+        otherUserId: 'seller',
+        otherUserName: 'Sam Seller',
+        lastMessageText: 'Hello',
+        isLastMessageDeleted: false,
+        lastMessageSenderId: 'seller',
+        lastMessageAt: at,
+        unreadCount: 0,
+        otherLastReadAt: null,
+        clearedAt: cleared,
+      );
+    }
+
+    test('getChatTarget carries ownNameIsPlaceholder', () async {
+      final target = await repo.getChatTarget('alice_seller');
+
+      expect(target.conversationId, 'alice_seller');
+      expect(target.otherUserName, 'Sam Seller');
+      expect(target.exists, isTrue);
+      expect(target.ownNameIsPlaceholder, isTrue);
+    });
+
+    test('openChatWith leaves ownNameIsPlaceholder false', () async {
+      final target = await repo.openChatWith(otherUserId: 'seller');
+
+      expect(target.ownNameIsPlaceholder, isFalse);
+    });
+
+    test('fillOwnPlaceholderName passes through to the datasource', () async {
+      await repo.fillOwnPlaceholderName('alice_seller');
+
+      expect(dataSource.fillCalls, ['alice_seller']);
+    });
+
+    test('watchConversations keeps only conversations visible in the list', () async {
+      final t = DateTime(2026, 11, 1, 10);
+      final updates = <ConversationsUpdate>[];
+      final sub = repo.watchConversations().listen(updates.add);
+
+      dataSource.conversationsController.add((
+        conversations: [
+          conversation('visible', at: t),
+          conversation('no-message'),
+          conversation('cleared', at: t, cleared: t.add(const Duration(hours: 1))),
+        ],
+        isFromCache: true,
+      ));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(updates.single.conversations.map((c) => c.id), ['visible']);
+      expect(updates.single.isFromCache, isTrue);
+      await sub.cancel();
     });
   });
 

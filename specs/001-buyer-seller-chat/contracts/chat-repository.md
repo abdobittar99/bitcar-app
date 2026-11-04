@@ -9,9 +9,10 @@ datasource; push is deferred ([future-push-notifications.md](future-push-notific
 | Method | Returns | Behavior | Errors (`AppException`) |
 |---|---|---|---|
 | `String get currentUserId` | uid | Signed-in uid | `auth` if signed out |
-| `Future<void> syncPublicProfile(String displayName)` | – | Writes own `publicProfiles/{uid}` `{ displayName }` only if missing or different (research D14) | permission (name does not match `users.fullName`), network; callers treat it as best effort |
+| `Future<void> syncPublicProfile(String displayName)` | – | Writes own `publicProfiles/{uid}` `{ displayName }` only if missing or different (research D14), and never when the read came from the cache, so no write is queued offline (FR-014b) | permission (name does not match `users.fullName`), network; callers treat it as best effort |
 | `Future<ChatTarget> openChatWith({required String otherUserId})` | `ChatTarget` | Deterministic id; reads the conversation once (exists → new vs existing, FR-003/FR-004); if it does not exist, reads the other user's public profile (`displayName`, or `"BitCar user"` if absent) for the header and the creation snapshot. No write | `validation` if `otherUserId == currentUserId`; network/firestore |
-| `Future<ChatTarget> getChatTarget(String conversationId)` | `ChatTarget` | Opening from the list (and, in a future phase, from a notification); if own entry in `participantNames` is the placeholder and own public profile exists, replaces it with own `displayName` (D14) | `notFound`, `permission` |
+| `Future<ChatTarget> getChatTarget(String conversationId)` | `ChatTarget` | Opening from the list (and, in a future phase, from a notification). One read of the conversation, no profile read and no write, so names never delay or block opening. `otherUserName` is the stored name, or the placeholder if absent. `ownNameIsPlaceholder` is true only when own stored name is the placeholder and the data came from the server | `notFound`, `permission` |
+| `Future<void> fillOwnPlaceholderName(String conversationId)` | – | Reads own `publicProfiles/{uid}`; if it is missing or from the cache, does nothing; otherwise updates only `participantNames.<uid>` to its `displayName`, which is exactly what rules `isFillOwnName` allow (D14). Best effort: run by `ChatBloc` without waiting | network, permission |
 | `Stream<ConversationsUpdate> watchConversations()` | stream | Current user's conversations ordered by `lastMessageAt` desc, filtered by `isVisibleInList`; cached data first | errors delivered on the stream |
 | `Stream<MessagesUpdate> watchLatestMessages({required String conversationId, required int pageSize})` | stream | Bounded live window (research D17): listener on the newest `pageSize` messages after own `clearedAt` (`orderBy createdAt desc, __name__ desc, limit(pageSize)`), merged with the conversation doc listener to carry `otherLastReadAt`, own `unreadCount` and own `clearedAt`. The conversation doc is read first; the messages listener starts after its first snapshot and restarts when own `clearedAt` changes. Never listens without a limit | on the stream |
 | `Future<MessagesPage> loadOlderMessages({required String conversationId, required MessageCursor before, DateTime? after, required int pageSize})` | `MessagesPage` | One-time read of the `pageSize` messages just older than `before` (`startAfter([Timestamp, id])`, same order, `createdAt > after` where `after` is own `clearedAt` from the latest `MessagesUpdate`); falls back to cache offline. `hasOlder` = false only if the **server** returned fewer than `pageSize` | network, permission |
@@ -28,6 +29,7 @@ datasource; push is deferred ([future-push-notifications.md](future-push-notific
 | `sync_public_profile.dart` | `SyncPublicProfile` | `Future<void> call(String displayName)`; used by `ConversationsBloc` (app open) and `ProfileBloc` (name change) |
 | `open_chat_with_seller.dart` | `OpenChatWithSeller` | `Future<ChatTarget> call(String sellerId)` |
 | `get_chat_target.dart` | `GetChatTarget` | `Future<ChatTarget> call(String conversationId)` |
+| `fill_own_placeholder_name.dart` | `FillOwnPlaceholderName` | `Future<void> call(String conversationId)`; used by `ChatBloc` |
 | `watch_conversations.dart` | `WatchConversations` | `Stream<ConversationsUpdate> call()` |
 | `watch_latest_messages.dart` | `WatchLatestMessages` | `Stream<MessagesUpdate> call(String conversationId, {int pageSize = 20})` |
 | `load_older_messages.dart` | `LoadOlderMessages` | `Future<MessagesPage> call(String conversationId, MessageCursor before, {DateTime? after, int pageSize = 20})` |
@@ -38,7 +40,7 @@ datasource; push is deferred ([future-push-notifications.md](future-push-notific
 | `delete_conversation.dart` | `DeleteConversation` | `Future<void> call(String conversationId)` |
 | `get_current_user_id.dart` | `GetCurrentUserId` | `String call()` |
 
-12 use cases. Rev. 4 (pagination, option A) replaced `WatchMessages` (growing `limit`) with `WatchLatestMessages`
+13 use cases (`FillOwnPlaceholderName` added before B8, so the name fill never blocks opening and its errors reach a bloc). Rev. 4 (pagination, option A) replaced `WatchMessages` (growing `limit`) with `WatchLatestMessages`
 (bounded live window) and `LoadOlderMessages` (one-time cursor read).
 
 Removed in rev. 2 (push deferred): `RequestNotificationPermission`, `RegisterDeviceToken`, `UnregisterDeviceToken`,

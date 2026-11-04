@@ -65,21 +65,23 @@ Navigation is plain `Navigator.push(MaterialPageRoute(...))` as elsewhere; back 
 
 | Event | Kind | Effect |
 |---|---|---|
-| `ConversationsStarted` | public | `GetCurrentUser` → `SyncPublicProfile(user.fullName)` (sync point 1: app opened after sign-in; failure shown via `AppErrorCubit`, chat continues); subscribe `WatchConversations` |
+| `ConversationsStarted` | public | `GetCurrentUser`, then subscribe `WatchConversations` at once and run `SyncPublicProfile(user.fullName)` in parallel without waiting (sync point 1: app opened after sign-in). Sync errors are handled inside that operation, so none is unhandled: `network` is not shown (the next app open repeats the sync), any other goes to `AppErrorCubit`; the list is unaffected in both cases; after `close()` nothing is shown. If `GetCurrentUser` fails: error shown, sync skipped. The list subscribes only with a valid uid: from `GetCurrentUser`, or else from the auth session (`GetCurrentUserId`); with neither, no Firestore query runs and `hasError: true` |
 | `ConversationDeletePressed(cid)` | public | `DeleteConversation` |
-| `ConversationsRetried` | public | Re-subscribe after an error |
-| `_ConversationsUpdated(update)` | internal | Emit list, `isFromCache`, `totalUnread` |
+| `ConversationsRetried` | public | Ignored while connecting or subscribed. If the sync has not started, repeats `GetCurrentUser` first (a success runs the skipped sync); then subscribes under the same uid rule. If the sync already started, only re-subscribes |
+| `_ConversationsUpdated(update)` | internal | Emit list and `totalUnread`. Cached data starts the 2 s offline timer if it is not running; server data cancels it and sets `isOffline: false` |
+| `_OfflineDelayElapsed` | internal | Sets `isOffline: true` if the latest update is still from the cache |
 | `_ConversationsFailed(error)` | internal | `appErrorCubit.showError`, `hasError: true`, `isLoading: false` |
 
 State (`ConversationsState`, `copyWith`): `isLoading`, `hasError`, `isOffline`, `conversations`, `totalUnread`.
-`close()` cancels the subscription.
+`isOffline` uses the same 2 s delay as `ChatBloc`, because Firestore delivers cached data first even when online.
+`close()` cancels the subscription and the offline timer.
 
 ## `ChatBloc` (`chat_room/bloc/`)
 
 | Event | Kind | Effect |
 |---|---|---|
 | `ChatStarted.fromCar(car)` | public | `OpenChatWithSeller(car.sellerId)`; set input draft to the inquiry text (FR-007); subscribe live window (`WatchLatestMessages`, 20) |
-| `ChatStarted.fromConversation(cid)` | public | `GetChatTarget(cid)`; empty draft (FR-009); subscribe live window (`WatchLatestMessages`, 20) |
+| `ChatStarted.fromConversation(cid)` | public | `GetChatTarget(cid)`; empty draft (FR-009); subscribe live window (`WatchLatestMessages`, 20). If `target.ownNameIsPlaceholder`: run `FillOwnPlaceholderName(cid)` without waiting, handling its errors inside that operation: `network` not shown (the next open repeats it), any other through `AppErrorCubit`, and nothing after the bloc is closed; the chat is unaffected in all cases |
 | `ChatMessageSubmitted(text)` | public | Validate (trim, 1–1,000; client rate pre-check); add optimistic `sending` message with `CreateMessageId`; `SendMessage`, one at a time in request order (a retry joins the same queue; a failure does not stop the next send; queued sends continue after the screen closes); on `AppException` → mark `failed` + `showError` |
 | `ChatMessageRetried(messageId)` | public | Re-send the same id (FR-014) |
 | `ChatMessageDeletePressed(messageId)` | public | `DeleteMessage` after UI confirmation |

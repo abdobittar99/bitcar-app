@@ -206,15 +206,23 @@ All findings below were checked against the current code in this repository, not
     private profile.
   - **Sync points** (use case `SyncPublicProfile`):
     1. App opened after sign-in: `ConversationsBloc` on `ConversationsStarted` (from `HomeLayout`), using the name from
-       `GetCurrentUser`. Creates the doc for users who registered before this feature.
+       `GetCurrentUser`. Creates the doc for users who registered before this feature. Runs in parallel with the
+       list subscription and never delays it; connection errors are not shown and the next app open repeats it; a
+       read from the cache writes nothing, so no write is queued offline (owner decision before B8, FR-014b).
+       If `GetCurrentUser` fails the name is unknown, so this sync does not start, even if the list subscribed with
+       the uid from the auth session. It runs after the next successful `GetCurrentUser`: on `ConversationsRetried`
+       (the Retry button of the list error state) or on the next app open. Until then the user's public name stays
+       as it was (missing, or the previous value), and sending still works with the placeholder rule below.
     2. Name changed: `ProfileBloc._onUpdated`, after `UpdateUserProfile` succeeds and the name differs. If the sync
        fails, the profile save still counts as successful, the error is shown through `AppErrorCubit`, and sync 1 repairs
        it on the next app start.
 - **Placeholder rule (owner's proposal, adopted)**: when creating a conversation, for each participant:
   - if `publicProfiles/{uid}` **exists**, the stored name **must equal** its `displayName`;
   - if it **does not exist**, the **only** accepted value is the fixed placeholder `"BitCar user"`.
-  - Later, a participant may replace **only their own** placeholder, **only with their own** profile name (done when they
-    open the conversation via `GetChatTarget`). Real names already stored never change (snapshot).
+  - Later, a participant may replace **only their own** placeholder, **only with their own** profile name. `GetChatTarget`
+    itself does not write: when it reports a placeholder from server data, `ChatBloc` runs `FillOwnPlaceholderName`
+    without waiting, so opening is never delayed or blocked, and the stored or placeholder name is shown meanwhile
+    (owner decision before B8). Real names already stored never change (snapshot).
   - Result: a client can never write an invented name, cannot use the placeholder for someone who has a profile, and
     cannot touch the other participant's entry. Rules contract cases R11–R15.
 - **Why the sender's own name is also checked**: the creator's own entry follows the same rule, so it cannot be faked

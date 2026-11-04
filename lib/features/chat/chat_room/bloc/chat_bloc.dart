@@ -11,6 +11,8 @@ import 'package:car_shop/features/chat/chat_room/bloc/chat_state.dart';
 import 'package:car_shop/features/chat/domain/model/message_cursor.dart';
 import 'package:car_shop/features/chat/domain/model/messages_update.dart';
 import 'package:car_shop/features/chat/domain/usecase/create_message_id.dart';
+import 'package:car_shop/features/chat/domain/usecase/fill_own_placeholder_name.dart';
+import 'package:car_shop/features/chat/domain/usecase/get_chat_target.dart';
 import 'package:car_shop/features/chat/domain/usecase/get_current_user_id.dart';
 import 'package:car_shop/features/chat/domain/usecase/load_older_messages.dart';
 import 'package:car_shop/features/chat/domain/usecase/mark_conversation_read.dart';
@@ -21,6 +23,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final OpenChatWithSeller openChatWithSeller;
+  final GetChatTarget getChatTarget;
+  final FillOwnPlaceholderName fillOwnPlaceholderName;
   final WatchLatestMessages watchLatestMessages;
   final LoadOlderMessages loadOlderMessages;
   final CreateMessageId createMessageId;
@@ -60,6 +64,8 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
 
   ChatBloc({
     required this.openChatWithSeller,
+    required this.getChatTarget,
+    required this.fillOwnPlaceholderName,
     required this.watchLatestMessages,
     required this.loadOlderMessages,
     required this.createMessageId,
@@ -86,15 +92,33 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     emit(state.copyWith(isLoading: true, draft: event.draft));
     try {
       final uid = getCurrentUserId();
-      final target = await openChatWithSeller(event.otherUserId);
+      final conversationId = event.conversationId;
+      final target = conversationId != null
+          ? await getChatTarget(conversationId)
+          : await openChatWithSeller(event.otherUserId!);
       if (isClosed) return;
       emit(state.copyWith(currentUserId: uid, target: target));
       _windowSettled = false;
       _olderLoaded = false;
       _subscribe(target.conversationId);
+      if (target.ownNameIsPlaceholder) {
+        unawaited(_fillOwnName(target.conversationId));
+      }
     } on AppException catch (e) {
       appErrorCubit.showError(e.message);
       emit(state.copyWith(isLoading: false));
+    }
+  }
+
+  // Best effort and never waited for: the chat works with the stored name. A connection error
+  // is repeated by the next open, so it is not shown; after close() the user has left and
+  // nothing is shown.
+  Future<void> _fillOwnName(String conversationId) async {
+    try {
+      await fillOwnPlaceholderName(conversationId);
+    } on AppException catch (e) {
+      if (isClosed || e.type == ErrorType.network) return;
+      appErrorCubit.showError(e.message);
     }
   }
 

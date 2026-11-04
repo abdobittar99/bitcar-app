@@ -13,6 +13,8 @@ abstract class ChatRepository {
 
   Future<ChatTarget> getChatTarget(String conversationId);
 
+  Future<void> fillOwnPlaceholderName(String conversationId);
+
   Stream<ConversationsUpdate> watchConversations();
 
   Stream<MessagesUpdate> watchLatestMessages({

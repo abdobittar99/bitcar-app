@@ -36,6 +36,14 @@ class FakeChatRepository implements ChatRepository {
   // When set, loadOlderMessages waits for it, so a request can be kept in flight.
   Completer<void>? olderGate;
 
+  // When set, these wait for it, so the operation can be kept in flight.
+  Completer<void>? fillGate;
+  Completer<void>? syncGate;
+
+  // Thrown after the gate, so a failure can arrive after the bloc is closed.
+  AppException? fillFailure;
+  AppException? syncFailure;
+
   // When set, sendMessage waits for it, so a send can be kept in flight.
   Completer<void>? sendGate;
 
@@ -72,6 +80,9 @@ class FakeChatRepository implements ChatRepository {
   @override
   Future<void> syncPublicProfile(String displayName) async {
     _record('syncPublicProfile', [displayName]);
+    await syncGate?.future;
+    final failure = syncFailure;
+    if (failure != null) throw failure;
   }
 
   @override
@@ -84,6 +95,14 @@ class FakeChatRepository implements ChatRepository {
   Future<ChatTarget> getChatTarget(String conversationId) async {
     _record('getChatTarget', [conversationId]);
     return target;
+  }
+
+  @override
+  Future<void> fillOwnPlaceholderName(String conversationId) async {
+    _record('fillOwnPlaceholderName', [conversationId]);
+    await fillGate?.future;
+    final failure = fillFailure;
+    if (failure != null) throw failure;
   }
 
   @override

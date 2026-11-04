@@ -3,13 +3,20 @@ import 'package:car_shop/entities/car.dart';
 abstract class ChatEvent {}
 
 class ChatStarted extends ChatEvent {
-  final String otherUserId;
+  final String? otherUserId;
+  final String? conversationId;
   final String draft;
 
   // Opened from a car's details page: the input is pre-filled with the inquiry (FR-007, FR-050).
   ChatStarted.fromCar(CarEntity car)
     : otherUserId = car.sellerId,
+      conversationId = null,
       draft = inquiryFor(car);
+
+  // Opened from the conversations list: the input is empty (FR-009).
+  ChatStarted.fromConversation(String this.conversationId)
+    : otherUserId = null,
+      draft = '';
 
   static String inquiryFor(CarEntity car) =>
       "Hello, I'm interested in your ${car.brand} ${car.model} (${car.year}). "
