@@ -9,7 +9,13 @@ enum SessionGateState { open, closing, wipePending }
 // so sign-out can stop all user listeners and refuse new work before the local cache is wiped
 // (research D18, FR-053).
 class SessionGate {
+  static const signOutIncompleteMessage =
+      'Could not finish signing out. Please restart the app to complete it.';
+  static const wipePendingMessage =
+      'Previous session data could not be cleared. Please try again.';
+
   SessionGateState _state = SessionGateState.open;
+  bool _signOutIncomplete = false;
   int _inFlight = 0;
   Completer<void>? _drained;
   Future<void>? _retrying;
@@ -22,6 +28,8 @@ class SessionGate {
   SessionGateState get state => _state;
 
   bool get isOpen => _state == SessionGateState.open;
+
+  bool get isSignOutIncomplete => _signOutIncomplete;
 
   Future<T> run<T>(Future<T> Function() op) async {
     // Count the operation synchronously while open, so a sign-out starting right after sees it.
@@ -91,11 +99,23 @@ class SessionGate {
 
   void markWipePending() => _state = SessionGateState.wipePending;
 
-  void open() => _state = SessionGateState.open;
+  // auth.signOut() failed, so the user is still signed in: nothing may reach Firestore, and no
+  // wipe retry may open the gate, until the next app start finishes the sign-out (research D18).
+  void markSignOutIncomplete() {
+    _signOutIncomplete = true;
+    _state = SessionGateState.wipePending;
+  }
+
+  void open() {
+    _signOutIncomplete = false;
+    _state = SessionGateState.open;
+  }
 
   Future<void> _ensureOpen() async {
     if (isOpen) return;
-    if (_state == SessionGateState.wipePending && retryWipe != null) {
+    if (_state == SessionGateState.wipePending &&
+        !_signOutIncomplete &&
+        retryWipe != null) {
       _retrying ??= retryWipe!().whenComplete(() => _retrying = null);
       await _retrying;
       if (isOpen) return;
@@ -104,9 +124,15 @@ class SessionGate {
   }
 
   AppException _refusal() {
+    if (_signOutIncomplete) {
+      return AppException(
+        message: signOutIncompleteMessage,
+        type: ErrorType.auth,
+      );
+    }
     if (_state == SessionGateState.wipePending) {
       return AppException(
-        message: 'Previous session data could not be cleared. Please try again.',
+        message: wipePendingMessage,
         type: ErrorType.cache,
       );
     }

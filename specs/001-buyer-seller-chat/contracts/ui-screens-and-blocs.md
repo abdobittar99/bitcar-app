@@ -14,7 +14,7 @@
 
 | Existing bloc | Change |
 |---|---|
-| `HomeBloc` (`features/home/bloc/home_bloc.dart`) | Inject `HasPendingWrites`. `LogoutPressed` → if pending writes: `showUnsyncedWarning: true` (dialog in `HomeLayout`: Cancel → `LogoutCancelled`, Log out → `LogoutConfirmed`); else sign-out. Sign-out sets `isSigningOut: true` (blocking "Signing out…" view) and calls `LogOut` (gate close → `terminate` → `clearPersistence` → `signOut`, research D18). `if (isClosed) return;` before every emit after an `await` (FR-052, FR-053) |
+| `HomeBloc` (`features/home/bloc/home_bloc.dart`) | Inject `HasPendingWrites`. `LogoutPressed`, ignored while `isCheckingPendingWrites` or `isSigningOut` → the Logout button in `profile_screen.dart` shows progress during the check → if pending writes: `showUnsyncedWarning: true` (dialog in `HomeLayout`: Cancel → `LogoutCancelled`, Log out → `LogoutConfirmed`); else sign-out. Sign-out sets `isSigningOut: true` (blocking "Signing out…" view) and calls `LogOut` (gate close → marker → `terminate` → `clearPersistence` → `signOut` → marker off → gate open, research D18). `AppException` → `showError`, `isSigningOut: false`; if `signOut` failed, Firestore stays blocked until the app restarts. `if (isClosed) return;` before every emit after an `await` (FR-052, FR-053) |
 | `ProfileBloc` (`features/profile/bloc/profile_bloc.dart`) | Inject `SyncPublicProfile`. In `_onUpdated`, after `updateUserProfile` succeeds and `fullName` changed, call `syncPublicProfile(result.fullName)` (sync point 2). If it throws `AppException`, show it via `appErrorCubit` but keep `isSuccess: true` (the profile itself was saved); sync point 1 repairs it on next app start |
 
 ## Screens (new)

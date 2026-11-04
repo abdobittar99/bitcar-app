@@ -39,6 +39,12 @@ class FakeHomeRepository implements HomeRepository {
 
   @override
   Future<void> logOut() async {}
+
+  @override
+  Future<bool> hasPendingWrites() async => false;
+
+  @override
+  Future<void> completePendingSignOut() async {}
 }
 
 class RecordingErrorCubit extends AppErrorCubit {

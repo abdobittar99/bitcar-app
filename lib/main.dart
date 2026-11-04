@@ -5,6 +5,7 @@ import 'package:car_shop/core/cache/cache_helper.dart';
 import 'package:car_shop/core/di/injection_container.dart';
 import 'package:car_shop/core/errors/app_error_listener.dart';
 import 'package:car_shop/core/errors/bloc/app_error_cubit.dart';
+import 'package:car_shop/features/home/domain/usecase/complete_pending_sign_out.dart';
 import 'package:car_shop/features/splash/bloc/splash_bloc.dart';
 import 'package:car_shop/features/splash/bloc/splash_event.dart';
 import 'package:car_shop/features/splash/data/splash_service.dart';
@@ -20,6 +21,8 @@ void main() {
       await Firebase.initializeApp();
       await CacheHelper.init();
       await init();
+      // Before anything can use Firestore: finishes a sign-out that did not complete (research D18).
+      await sl<CompletePendingSignOut>()();
 
       FlutterError.onError = (FlutterErrorDetails details) {
         FlutterError.presentError(details);

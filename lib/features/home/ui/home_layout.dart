@@ -19,6 +19,7 @@ import 'package:car_shop/features/feeds/bloc/feeds_event.dart';
 import 'package:car_shop/features/home/bloc/home_bloc.dart';
 import 'package:car_shop/features/home/bloc/home_event.dart';
 import 'package:car_shop/features/home/bloc/home_state.dart';
+import 'package:car_shop/features/home/ui/home_logout_gate.dart';
 import 'package:car_shop/features/home/ui/home_navigation.dart';
 import 'package:car_shop/features/profile/bloc/profile_bloc.dart';
 import 'package:car_shop/features/profile/bloc/profile_event.dart';
@@ -52,195 +53,204 @@ class HomeLayout extends StatelessWidget {
           create: (_) => sl<ConversationsBloc>()..add(ConversationsStarted()),
         ),
       ],
-      child: BlocConsumer<HomeBloc, HomeState>(
-        listener: (context, state) {},
-        builder: (context, state) {
-          final isSeller = state.role == UserRole.seller;
-          if (state.isLoading) {
-            return SplashScreen();
-          }
-          return Scaffold(
-            backgroundColor: Colors.white,
-            appBar: AppBar(
+      child: HomeLogoutGate(
+        child: BlocConsumer<HomeBloc, HomeState>(
+          listener: (context, state) {},
+          builder: (context, state) {
+            final isSeller = state.role == UserRole.seller;
+            if (state.isLoading) {
+              return SplashScreen();
+            }
+            return Scaffold(
               backgroundColor: Colors.white,
-              surfaceTintColor: Colors.white,
-              elevation: 0,
-              scrolledUnderElevation: 0,
-              title: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF0D47A1), Color(0xFF1976D2)],
+              appBar: AppBar(
+                backgroundColor: Colors.white,
+                surfaceTintColor: Colors.white,
+                elevation: 0,
+                scrolledUnderElevation: 0,
+                title: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF0D47A1), Color(0xFF1976D2)],
+                        ),
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      borderRadius: BorderRadius.circular(12),
+                      child: const Icon(
+                        Icons.directions_car_filled_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
                     ),
-                    child: const Icon(
-                      Icons.directions_car_filled_rounded,
-                      color: Colors.white,
-                      size: 22,
-                    ),
-                  ),
 
-                  const SizedBox(width: 10),
+                    const SizedBox(width: 10),
 
-                  RichText(
-                    text: const TextSpan(
-                      children: [
-                        TextSpan(
-                          text: 'Bit',
-                          style: TextStyle(
-                            color: Color.fromARGB(255, 11, 63, 139),
-                            fontSize: 24,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1,
-                          ),
-                        ),
-
-                        TextSpan(
-                          text: 'Car',
-                          style: TextStyle(
-                            color: Colors.black87,
-                            fontSize: 24,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-
-              actions: [
-                BlocBuilder<ConversationsBloc, ConversationsState>(
-                  builder: (context, conversationsState) {
-                    return IconButton(
-                      tooltip: 'Conversations',
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => BlocProvider.value(
-                              value: context.read<ConversationsBloc>(),
-                              child: const ConversationsScreen(),
+                    RichText(
+                      text: const TextSpan(
+                        children: [
+                          TextSpan(
+                            text: 'Bit',
+                            style: TextStyle(
+                              color: Color.fromARGB(255, 11, 63, 139),
+                              fontSize: 24,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1,
                             ),
                           ),
-                        );
-                      },
-                      icon: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          const Icon(Icons.chat_bubble_outline),
-                          if (conversationsState.totalUnread > 0)
-                            Positioned(
-                              top: -2,
-                              right: -2,
-                              child: Semantics(
-                                label: 'Unread messages',
-                                child: Container(
-                                  width: 10,
-                                  height: 10,
-                                  decoration: const BoxDecoration(
-                                    color: Colors.red,
-                                    shape: BoxShape.circle,
+
+                          TextSpan(
+                            text: 'Car',
+                            style: TextStyle(
+                              color: Colors.black87,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+
+                actions: [
+                  BlocBuilder<ConversationsBloc, ConversationsState>(
+                    builder: (context, conversationsState) {
+                      return IconButton(
+                        tooltip: 'Conversations',
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => BlocProvider.value(
+                                value: context.read<ConversationsBloc>(),
+                                child: const ConversationsScreen(),
+                              ),
+                            ),
+                          );
+                        },
+                        icon: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            const Icon(Icons.chat_bubble_outline),
+                            if (conversationsState.totalUnread > 0)
+                              Positioned(
+                                top: -2,
+                                right: -2,
+                                child: Semantics(
+                                  label: 'Unread messages',
+                                  child: Container(
+                                    width: 10,
+                                    height: 10,
+                                    decoration: const BoxDecoration(
+                                      color: Colors.red,
+                                      shape: BoxShape.circle,
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                        ],
-                      ),
-                      color: const Color.fromARGB(255, 1, 37, 90),
-                    );
-                  },
-                ),
-                IconButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => MultiBlocProvider(
-                          providers: [
-                            BlocProvider.value(value: context.read<HomeBloc>()),
-
-                            BlocProvider.value(
-                              value: context.read<FavoriteBloc>(),
-                            ),
-
-                            BlocProvider.value(value: context.read<CarsBloc>()),
                           ],
-                          child: const SearchScreen(),
                         ),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.search),
-                  color: Color.fromARGB(255, 1, 37, 90),
-                ),
-              ],
-            ),
-
-            body: bottomNavTabs[state.currentIndex],
-            floatingActionButton: isSeller
-                ? FloatingActionButton(
-                    backgroundColor: Color.fromARGB(255, 1, 37, 90),
-                    onPressed: () async {
-                      final result = await Navigator.push(
+                        color: const Color.fromARGB(255, 1, 37, 90),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => BlocProvider(
-                            create: (_) => sl<CarFormBloc>(),
-                            child: AddCarScreen(),
+                          builder: (_) => MultiBlocProvider(
+                            providers: [
+                              BlocProvider.value(
+                                value: context.read<HomeBloc>(),
+                              ),
+
+                              BlocProvider.value(
+                                value: context.read<FavoriteBloc>(),
+                              ),
+
+                              BlocProvider.value(
+                                value: context.read<CarsBloc>(),
+                              ),
+                            ],
+                            child: const SearchScreen(),
                           ),
                         ),
                       );
-                      if (!context.mounted) return;
-                      if (result == true) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Add Car Successfully')),
-                        );
-                        context.read<MyCarsBloc>().add(MyCarsReloaded());
-                      }
                     },
-                    child: const Icon(Icons.add, color: Colors.white54),
-                  )
-                : null,
-            floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-            bottomNavigationBar: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withAlpha(20),
-                    blurRadius: 10,
-                    offset: const Offset(0, -2),
+                    icon: const Icon(Icons.search),
+                    color: Color.fromARGB(255, 1, 37, 90),
                   ),
                 ],
               ),
-              child: BottomNavigationBar(
-                type: BottomNavigationBarType.fixed,
-                currentIndex: state.currentIndex,
-                items: bottomNavItems,
 
-                backgroundColor: Colors.white,
+              body: bottomNavTabs[state.currentIndex],
+              floatingActionButton: isSeller
+                  ? FloatingActionButton(
+                      backgroundColor: Color.fromARGB(255, 1, 37, 90),
+                      onPressed: () async {
+                        final result = await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => BlocProvider(
+                              create: (_) => sl<CarFormBloc>(),
+                              child: AddCarScreen(),
+                            ),
+                          ),
+                        );
+                        if (!context.mounted) return;
+                        if (result == true) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Add Car Successfully'),
+                            ),
+                          );
+                          context.read<MyCarsBloc>().add(MyCarsReloaded());
+                        }
+                      },
+                      child: const Icon(Icons.add, color: Colors.white54),
+                    )
+                  : null,
+              floatingActionButtonLocation:
+                  FloatingActionButtonLocation.endFloat,
+              bottomNavigationBar: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withAlpha(20),
+                      blurRadius: 10,
+                      offset: const Offset(0, -2),
+                    ),
+                  ],
+                ),
+                child: BottomNavigationBar(
+                  type: BottomNavigationBarType.fixed,
+                  currentIndex: state.currentIndex,
+                  items: bottomNavItems,
 
-                selectedItemColor: Color.fromARGB(255, 2, 45, 110),
+                  backgroundColor: Colors.white,
 
-                unselectedItemColor: Colors.black45,
+                  selectedItemColor: Color.fromARGB(255, 2, 45, 110),
 
-                selectedFontSize: 13,
-                unselectedFontSize: 11,
+                  unselectedItemColor: Colors.black45,
 
-                elevation: 10,
+                  selectedFontSize: 13,
+                  unselectedFontSize: 11,
 
-                onTap: (index) {
-                  context.read<HomeBloc>().add(HomeTabChanged(index));
-                },
+                  elevation: 10,
+
+                  onTap: (index) {
+                    context.read<HomeBloc>().add(HomeTabChanged(index));
+                  },
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }

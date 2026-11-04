@@ -200,5 +200,123 @@ void main() {
         throwsA(appException(ErrorType.cache)),
       );
     });
+
+    test('the refusal after a failed wipe has the wipe message', () async {
+      gate.markWipePending();
+      await expectLater(
+        gate.run(() async => 1),
+        throwsA(
+          appException(ErrorType.cache).having(
+            (e) => e.message,
+            'message',
+            'Previous session data could not be cleared. Please try again.',
+          ),
+        ),
+      );
+      expect(gate.isSignOutIncomplete, isFalse);
+    });
+  });
+
+  group('sign-out incomplete', () {
+    late int retries;
+    late int operations;
+
+    setUp(() {
+      retries = 0;
+      operations = 0;
+      gate.retryWipe = () async {
+        retries++;
+        gate.open();
+      };
+      gate.markSignOutIncomplete();
+    });
+
+    Matcher signOutRefusal() => throwsA(
+      appException(ErrorType.auth).having(
+        (e) => e.message,
+        'message',
+        'Could not finish signing out. Please restart the app to complete it.',
+      ),
+    );
+
+    test('state is wipePending and it is reported', () {
+      expect(gate.state, SessionGateState.wipePending);
+      expect(gate.isSignOutIncomplete, isTrue);
+    });
+
+    test('run is refused with its own message, without retrying the wipe', () async {
+      await expectLater(gate.run(() async => operations++), signOutRefusal());
+
+      expect(operations, 0);
+      expect(retries, 0);
+      expect(gate.state, SessionGateState.wipePending);
+    });
+
+    test('watch is refused with its own message', () async {
+      final errors = <Object>[];
+      var done = false;
+      gate
+          .watch(() => Stream<int>.value(1))
+          .listen((_) {}, onError: errors.add, onDone: () => done = true);
+      await pumpEventQueue();
+
+      expect(errors.single, appException(ErrorType.auth));
+      expect(done, isTrue);
+    });
+
+    test('markWipePending does not undo it', () async {
+      gate.markWipePending();
+
+      expect(gate.isSignOutIncomplete, isTrue);
+      await expectLater(gate.run(() async => operations++), signOutRefusal());
+      expect(retries, 0);
+    });
+  });
+
+  // Research D18 step 1: _inFlight is never reset, so it can be too high but never too low.
+  group('in-flight count across sessions', () {
+    test('an abandoned operation finishing later does not hide a live operation of the new session', () {
+      fakeAsync((async) {
+        final abandoned = Completer<void>();
+        final live = Completer<void>();
+        gate.run(() => abandoned.future);
+
+        var firstClosed = false;
+        gate.closeForSignOut().then((_) => firstClosed = true);
+        async.elapse(const Duration(seconds: 5));
+        expect(firstClosed, isTrue);
+        gate.open();
+
+        gate.run(() => live.future);
+        async.flushMicrotasks();
+        abandoned.complete();
+        async.flushMicrotasks();
+
+        var secondClosed = false;
+        gate.closeForSignOut().then((_) => secondClosed = true);
+        async.elapse(const Duration(seconds: 4));
+        expect(secondClosed, isFalse, reason: 'the live operation is still counted');
+
+        live.complete();
+        async.flushMicrotasks();
+        expect(secondClosed, isTrue);
+      });
+    });
+
+    test('an operation that never finishes only makes the next sign-out wait the full timeout', () {
+      fakeAsync((async) {
+        gate.run(() => Completer<void>().future);
+        gate.closeForSignOut();
+        async.elapse(const Duration(seconds: 5));
+        gate.open();
+
+        var closed = false;
+        gate.closeForSignOut().then((_) => closed = true);
+        async.elapse(const Duration(seconds: 4));
+        expect(closed, isFalse);
+        async.elapse(const Duration(seconds: 1));
+        expect(closed, isTrue);
+      });
+    });
   });
 }

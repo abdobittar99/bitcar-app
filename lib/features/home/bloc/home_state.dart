@@ -6,6 +6,9 @@ class HomeState {
   final UserRole? role;
   final int currentIndex;
   final String? error;
+  final bool showUnsyncedWarning;
+  final bool isCheckingPendingWrites;
+  final bool isSigningOut;
 
   const HomeState({
     this.isLoading = true,
@@ -13,6 +16,9 @@ class HomeState {
     this.role,
     this.currentIndex = 0,
     this.error,
+    this.showUnsyncedWarning = false,
+    this.isCheckingPendingWrites = false,
+    this.isSigningOut = false,
   });
 
   HomeState copyWith({
@@ -21,6 +27,9 @@ class HomeState {
     UserRole? role,
     int? currentIndex,
     String? error,
+    bool? showUnsyncedWarning,
+    bool? isCheckingPendingWrites,
+    bool? isSigningOut,
   }) {
     return HomeState(
       isLoading: isLoading ?? this.isLoading,
@@ -28,6 +37,10 @@ class HomeState {
       role: role ?? this.role,
       currentIndex: currentIndex ?? this.currentIndex,
       error: error,
+      showUnsyncedWarning: showUnsyncedWarning ?? this.showUnsyncedWarning,
+      isCheckingPendingWrites:
+          isCheckingPendingWrites ?? this.isCheckingPendingWrites,
+      isSigningOut: isSigningOut ?? this.isSigningOut,
     );
   }
 }

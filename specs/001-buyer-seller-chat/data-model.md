@@ -207,15 +207,17 @@ Batch size is a constant `messagesPageSize = 20` (spec FR-037/FR-038).
 ```text
  open ── LogoutConfirmed / no pending writes ──► closing   (streams cancelled, new operations refused,
                                                           in-flight drained ≤ 5 s)
- closing ── terminate + clearPersistence OK ──► open       (marker removed, auth.signOut())
- closing ── wipe fails ──► wipePending                     (marker kept, auth.signOut() still runs)
- wipePending ── any Firestore operation ──► retry wipe ── OK ──► open
-                                                    └── fails ──► refused (ErrorType.cache)
+ closing ── wipe OK and auth.signOut() OK ──► open         (marker removed after signOut)
+ closing ── wipe fails, auth.signOut() OK ──► wipePending  (marker kept; a wipe retry can open the gate)
+ closing ── auth.signOut() fails ──► wipePending           (marker kept; retry refused, no Firestore until restart)
+ wipePending ── any Firestore operation ──► retry wipe only, never signOut ── OK ──► open
+                                                    └── fails or refused ──► operation refused (ErrorType.cache)
  app start with marker set ──► wipe + signOut before runApp ──► open | wipePending
 ```
 
 Local device key (SharedPreferences via `CacheHelper`): `CacheKeys.firestoreWipePending = 'firestore_wipe_pending'`
-(bool). Set before `terminate()`, removed after a successful `clearPersistence()`.
+(bool). Set before `terminate()`. On sign-out and at startup it is removed only after both the wipe and `signOut()`
+succeed; the wipe retry removes it after its wipe succeeds, since the sign-out already finished.
 
 ### Unread count (per user, per conversation)
 

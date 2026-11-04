@@ -378,8 +378,15 @@ unchanged) and wipe it on sign-out with `terminate()` + `clearPersistence()`; wa
    - `Future<void> closeForSignOut()`: state → `closing` (new operations rejected), cancels every registered stream
      (the bloc subscriptions receive *done*, not an error), then waits for in-flight operations (max 5 s; after that
      they are abandoned and fail harmlessly once the instance is terminated).
-   - `Future<void> Function()? retryWipe`: set at DI time to the home datasource's wipe method.
-   - `open()` after a successful wipe.
+   - **Abandoned operations and the in-flight count (reviewed before B11, no change needed)**: `_inFlight` is never
+     reset. Each operation adds 1 once and its `finally` subtracts 1 once, whenever it finishes, even in a later
+     session. So the count can be too high but never too low, and a sign-out never skips waiting for a live operation.
+     The only cost: an operation that never finishes makes each later sign-out in that app run wait the full 5 s. A
+     reset is rejected, because a late `finally` would then lower the new session's count. No generation counter is
+     added, since the current behavior is already safe. Tests in T074 keep this true.
+   - `Future<void> Function()? retryWipe`: set at DI time to `HomeRemoteDataSource.retryPendingWipe`, which only wipes
+     and **never signs out** (step 4).
+   - `open()` after a successful wipe and sign-out.
 2. **Pending-write check before sign-out** (`HasPendingWrites` use case → `HomeRemoteDataSource.hasPendingWrites()`):
    `waitForPendingWrites().timeout(3 s)`; completes → no unsynced writes; times out → unsynced writes exist. A slow
    network can produce a false "unsynced" warning, never a missed one (safe side).
@@ -388,19 +395,40 @@ unchanged) and wipe it on sign-out with `terminate()` + `clearPersistence()`; wa
    2. `CacheHelper` marker `firestore_wipe_pending = true`
    3. `firestore.terminate()`
    4. `firestore.clearPersistence()`
-   5. marker removed
-   6. `auth.signOut()` (last, so listeners never see a signed-out state → no `permission-denied`)
+   5. `auth.signOut()` (after the listeners stopped, so they never see a signed-out state → no `permission-denied`)
+   6. marker removed
    7. `sessionGate.open()`
-   - If step 3 or 4 fails: the marker stays, the gate goes to `wipePending`, and `auth.signOut()` still runs (the
-     session ends). While `wipePending`, every Firestore operation first retries the wipe through `retryWipe` and is
-     refused with `AppException(type: ErrorType.cache, message: 'Previous session data could not be cleared. Please
-     try again.')` if it fails again. Sign-in calls `AuthRemoteDatasource`, which goes through the gate too, so a new
-     user cannot reach Firestore before the wipe succeeds.
-4. **Startup completion** (`CompletePendingSignOut` use case, called in `main.dart` after `init()` and **before
-   `runApp`**, so before any Firestore access): if the marker is set → `terminate()` (harmless on an unstarted
-   instance) → `clearPersistence()` → remove marker → `auth.signOut()` (completes a sign-out that was interrupted,
-   e.g. app killed) → gate `open`; on failure the marker stays, the gate starts in `wipePending` **and
-   `auth.signOut()` still runs**, so the interrupted sign-out is always completed (same rule as step 3).
+
+   The marker is removed **after** `signOut()` (changed before B11): if the app is killed between the two, the next
+   start wipes again, which is harmless, and finishes the sign-out. Removing it first could leave the user signed in
+   with no record that the sign-out was unfinished (FR-053).
+
+   | Result | Marker | Gate | Error thrown |
+   |---|---|---|---|
+   | Wipe OK, `signOut` OK | removed | `open` | none |
+   | Wipe fails, `signOut` OK | kept | `wipePending`; each Firestore operation retries the wipe through `retryWipe` and is refused if it fails again | `ErrorType.cache`: "Previous session data could not be cleared. Please try again." |
+   | `signOut` fails, wipe OK or not (owner decision before B11) | kept | `wipePending` through `markSignOutIncomplete()`: **no wipe retry**, so no Firestore operation runs for the rest of this app run, even if a wipe could succeed | `ErrorType.auth`: "Could not finish signing out. Please restart the app to complete it." |
+
+   In the last case the user is still signed in, so opening the gate would let them use Firestore after asking to
+   leave. A second Logout is **not allowed** in this app run: `logOut` and `hasPendingWrites` throw the same error
+   without touching Firestore, the gate or the marker, and the next start finishes through step 4.
+
+   The gate holds the reason, so refused operations show the message of that reason: the two errors above, with the
+   same types. Sign-in itself does not touch Firestore, and every later read goes through the gate, so a new user
+   cannot reach Firestore before the wipe succeeds.
+4. **Startup completion and wipe retry are two different operations (changed before B11)**:
+
+   | | `completePendingSignOut` | `retryPendingWipe` |
+   |---|---|---|
+   | Called by | `CompletePendingSignOut` use case, in `main.dart` after `init()` and **before `runApp`**, before any Firestore access | `SessionGate.retryWipe`, from a Firestore operation while `wipePending` |
+   | Steps | If the marker is set: `terminate()` (harmless on an unstarted instance) → `clearPersistence()` → `auth.signOut()` → remove marker → `open` | `terminate()` → `clearPersistence()` → remove marker → `open` |
+   | Calls `auth.signOut()` | **Yes**: it finishes a sign-out that was interrupted, e.g. app killed | **Never** |
+   | On failure | Marker kept, `wipePending`, no throw at startup. A wipe failure still runs `auth.signOut()`; a `signOut` failure calls `markSignOutIncomplete()` | Marker kept, stays `wipePending`, no throw: the gate refuses the operation |
+   | After a failed `signOut` | Runs: a new app run starts without that state | Not called: the gate refuses without retrying |
+
+   They must stay separate. If the retry signed out, a wipe that succeeds after user O signed in would sign O out at
+   their first Firestore read. A consequence of the safe side: if the marker is still set and O restarts the app, the
+   startup step signs O out once before wiping.
 5. **No `permission-denied` after sign-out**: listeners are cancelled in step 3.1, before `signOut()`. As a second
    line, every chat stream goes through `ChatRemoteDataSource._watchGuarded` (which wraps `sessionGate.watch`), and
    its error handling decides with an **explicit check** (no bare `catch`, constitution III), approved 2026-11-03:
@@ -417,12 +445,17 @@ unchanged) and wipe it on sign-out with `terminate()` + `clearPersistence()`; wa
    failed wipe would see an empty screen without explanation. Blocs treat stream *done* as no-op.
    The helper became private (`_watchGuarded`) at T034, once `watchLatestMessages` used it; T057 uses it the same
    way from inside the datasource.
-6. **UI during sign-out**: `HomeBloc` emits `isSigningOut: true`; `HomeLayout` replaces its body with a blocking
-   progress view, so no new user action starts Firestore work. `HomeBloc` checks `isClosed` before emitting after
+6. **UI during sign-out**: `HomeBloc` emits `isSigningOut: true`; `HomeLogoutGate` (in `HomeLayout`) covers the app
+   with a blocking progress view, so no new user action starts Firestore work. It covers rather than replaces the
+   tabs, so they keep their state if the sign-out fails and `profile_screen.dart` stays mounted for `isSuccess`. `HomeBloc` checks `isClosed` before emitting after
    the sign-out (the auth stream disposes `HomeLayout`).
 7. **Warning dialog (FR-052)**: `LogoutPressed` → `HasPendingWrites`; if true → state `showUnsyncedWarning` →
    `BlocListener` shows "Some changes haven't been saved to the server yet and will be lost. Log out anyway?" with
    **Cancel** (`LogoutCancelled`, stays signed in) and **Log out** (`LogoutConfirmed`). If false → sign-out directly.
+   The check can take up to 3 s, so the Logout button shows progress (`isCheckingPendingWrites`) and repeated presses
+   are ignored.
+8. **Accepted**: a background operation refused during sign-out (a queued message, for example) may show "Signing out,
+   please wait" behind the blocking view. It is harmless, so it is left as it is and watched in Q23.
 
 **Alternatives considered**: B (persistence off) rejected by the owner (breaks offline reading after restart,
 FR-014b, and changes existing screens); wiping inside `logOut()` without a gate (listeners and in-flight calls can
