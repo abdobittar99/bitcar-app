@@ -124,7 +124,7 @@ register writes `users/{uid}` right after the account is created, so it is alrea
 | R3 | Participant | create message with `senderId` of the other user | denied |
 | R4 | Participant | edit `text` of own non-deleted message to new text | denied (no editing) |
 | R5 | Participant | delete other user's message | denied |
-| R6 | Participant | set other user's `unreadCount` to any value, lower it by one with no message deleted, or change their `lastReadAt` / `clearedAt` | denied. **Open until the rules of research D19 are deployed**: lowering it by one is currently allowed |
+| R6 | Participant | set other user's `unreadCount` to any value, lower it by one with no message deleted, or change their `lastReadAt` / `clearedAt` | denied. Lowering it by one with no message deleted was allowed until the rules of research D19 were deployed on 2026-11-04 (ruleset `f5ae6bcf-a13c-4bc3-b047-4e565cda37d7`) |
 | R7 | Signed-in user | create conversation for two other users | denied |
 | R8 | Participant | 21st message within 60 s | denied |
 | R9 | Signed-out client | any chat path | denied |

@@ -206,7 +206,7 @@ jumps to the top with preview, time and badge; opening clears the badge
 **Independent Test**: quickstart Q15 plus the rules suite
 
 - [X] T066 [US6] Final review of `firestore_tests/chat.rules.test.js` against FR-032–FR-034 (cases written in T009): non-participant (buyer, seller and **admin** roles) `get`/`list`/create/update on a conversation and its messages; a participant forging `senderId`; a participant deleting the other user's message; signed-out access. Add only what is missing; run the suite in the **Firebase Emulator Terminal**
-- [ ] T067 [US6] Run quickstart Q15 with accounts O and M (admin) against the emulator or the deployed rules and report any deviation in the implementation notes
+- [X] T067 [US6] Run quickstart Q15 with accounts O and M (admin) against the deployed rules and report any deviation in the implementation notes. Done 2026-11-04 by the owner on a real device against `carshop-b79bc` (ruleset `f5ae6bcf-a13c-4bc3-b047-4e565cda37d7`), with the app data cleared between accounts: passed for O, M and the Console check, S saw three separate conversations, no deviation. Direct reads of another conversation cannot be tried from the UI; they are covered by the rules suite (T066)
 
 **Decision R6 (2026-11-04, owner approved; no new tasks, no renumbering)**: the T066 review found that a participant
 can lower the other user's unread count with no message deleted. The fix of research D19 is part of T066: rules cases
