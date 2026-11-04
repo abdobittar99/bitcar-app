@@ -11,6 +11,7 @@ import 'package:car_shop/features/chat/chat_room/bloc/chat_state.dart';
 import 'package:car_shop/features/chat/domain/model/message_cursor.dart';
 import 'package:car_shop/features/chat/domain/model/messages_update.dart';
 import 'package:car_shop/features/chat/domain/usecase/create_message_id.dart';
+import 'package:car_shop/features/chat/domain/usecase/delete_message.dart';
 import 'package:car_shop/features/chat/domain/usecase/fill_own_placeholder_name.dart';
 import 'package:car_shop/features/chat/domain/usecase/get_chat_target.dart';
 import 'package:car_shop/features/chat/domain/usecase/get_current_user_id.dart';
@@ -30,6 +31,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   final CreateMessageId createMessageId;
   final SendMessage sendMessage;
   final MarkConversationRead markConversationRead;
+  final DeleteMessage deleteMessage;
   final GetCurrentUserId getCurrentUserId;
   final AppErrorCubit appErrorCubit;
   // Clock for the client rate pre-check; tests pass their own.
@@ -57,6 +59,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
   Timer? _offlineTimer;
   Future<void> _lastSend = Future.value();
   final List<DateTime> _recentSends = [];
+  final Set<String> _deleting = {};
   MessagesUpdate? _lastUpdate;
   bool _windowSettled = false;
   bool _olderLoaded = false;
@@ -71,6 +74,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     required this.createMessageId,
     required this.sendMessage,
     required this.markConversationRead,
+    required this.deleteMessage,
     required this.getCurrentUserId,
     required this.appErrorCubit,
     DateTime Function()? now,
@@ -79,6 +83,7 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     on<ChatStarted>(_onStarted);
     on<ChatMessageSubmitted>(_onMessageSubmitted);
     on<ChatMessageRetried>(_onMessageRetried);
+    on<ChatMessageDeletePressed>(_onMessageDeletePressed);
     on<ChatVisibilityChanged>(_onVisibilityChanged);
     on<ChatLoadOlderRequested>(_onLoadOlderRequested);
     on<ChatRetried>(_onRetried);
@@ -236,6 +241,53 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     }
   }
 
+  // Only for own, server-confirmed messages. Nothing changes on screen before the server accepts
+  // the delete; the local copy is then updated in place, so a message outside the live window
+  // shows the placeholder too (FR-027).
+  Future<void> _onMessageDeletePressed(
+    ChatMessageDeletePressed event,
+    Emitter<ChatState> emit,
+  ) async {
+    final target = state.target;
+    final id = event.messageId;
+    if (target == null || !state.canDelete || _deleting.contains(id)) return;
+    final message = state.messages.where((m) => m.id == id).firstOrNull;
+    if (message == null ||
+        message.senderId != state.currentUserId ||
+        message.isDeleted ||
+        (message.status != MessageStatus.sent &&
+            message.status != MessageStatus.read)) {
+      return;
+    }
+
+    _deleting.add(id);
+    try {
+      await deleteMessage(
+        conversationId: target.conversationId,
+        messageId: id,
+      );
+      emit(
+        state.copyWith(
+          liveMessages: _markDeleted(state.liveMessages, id),
+          loadedMessages: _markDeleted(state.loadedMessages, id),
+        ),
+      );
+    } on AppException catch (e) {
+      appErrorCubit.showError(e.message);
+    } finally {
+      _deleting.remove(id);
+    }
+  }
+
+  Map<String, MessageEntity> _markDeleted(
+    Map<String, MessageEntity> messages,
+    String id,
+  ) {
+    final message = messages[id];
+    if (message == null) return messages;
+    return {...messages, id: message.copyWith(isDeleted: true, text: '')};
+  }
+
   // Client pre-check of the rules limit: at most 20 sends in the last 60 s.
   bool _rateLimited() {
     final current = now();
@@ -292,12 +344,18 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     if (state.olderBatchIncomplete && (_lastUpdate?.isFromCache ?? true)) return;
     emit(state.copyWith(isLoadingOlder: true, olderLoadFailed: false));
 
+    final after = state.clearedAt;
     try {
       final page = await loadOlderMessages(
         target.conversationId,
         cursor,
-        after: state.clearedAt,
+        after: after,
       );
+      // The conversation was cleared while loading: this batch and its cursor are out of date.
+      if (state.clearedAt != after) {
+        emit(state.copyWith(isLoadingOlder: false));
+        return;
+      }
       _olderLoaded = true;
       // A short batch from the cache only does not end the history; the cursor stays so the
       // same batch is read again from the server (research D17).
@@ -345,6 +403,19 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
     for (final m in state.liveMessages.values) {
       if (!live.containsKey(m.id)) loaded[m.id] = m;
     }
+    // Own clearedAt moved (a delete from another device, FR-027a): earlier messages leave the
+    // screen. Local pending/failed messages have no server time and always stay.
+    final cleared = update.clearedAt;
+    final previousCleared = state.clearedAt;
+    final clearedAdvanced =
+        cleared != null &&
+        (previousCleared == null || cleared.isAfter(previousCleared));
+    if (clearedAdvanced) {
+      bool isHidden(String _, MessageEntity m) =>
+          m.createdAt != null && !m.createdAt!.isAfter(cleared);
+      live.removeWhere(isHidden);
+      loaded.removeWhere(isHidden);
+    }
     // A local message is dropped once the server copy with the same id arrives.
     final pending = Map.of(state.pendingMessages)
       ..removeWhere((id, _) => live.containsKey(id) || loaded.containsKey(id));
@@ -378,6 +449,17 @@ class ChatBloc extends Bloc<ChatEvent, ChatState> {
         hasOlder:
             update.isFromCache || update.messages.length >= messagesPageSize,
         oldestCursor: _oldestOf(update.messages),
+      );
+    }
+    // After removing cleared messages, pagination restarts from what is left.
+    if (clearedAdvanced) {
+      final oldest = _oldestOf([...live.values, ...loaded.values]);
+      next = next.copyWith(
+        hasOlder: update.isFromCache || live.length >= messagesPageSize,
+        olderBatchIncomplete: false,
+        olderLoadFailed: false,
+        oldestCursor: oldest,
+        clearOldestCursor: oldest == null,
       );
     }
     if (!update.isFromCache) _windowSettled = true;

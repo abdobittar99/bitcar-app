@@ -34,6 +34,12 @@ class ChatMessageRetried extends ChatEvent {
   ChatMessageRetried(this.messageId);
 }
 
+// Delete for everyone, after the user confirmed (FR-027, FR-047).
+class ChatMessageDeletePressed extends ChatEvent {
+  final String messageId;
+  ChatMessageDeletePressed(this.messageId);
+}
+
 // From the app lifecycle: messages are marked read only while the chat is on screen.
 class ChatVisibilityChanged extends ChatEvent {
   final bool isVisible;

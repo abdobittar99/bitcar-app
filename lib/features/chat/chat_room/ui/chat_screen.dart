@@ -74,6 +74,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         onRetryOlder: () => bloc.add(ChatLoadOlderRequested()),
                         onRetryMessage: (id) =>
                             bloc.add(ChatMessageRetried(id)),
+                        canDelete: state.canDelete,
+                        onDeleteMessage: (id) =>
+                            bloc.add(ChatMessageDeletePressed(id)),
                       ),
               ),
               MessageInputBar(

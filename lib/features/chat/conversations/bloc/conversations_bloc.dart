@@ -6,6 +6,7 @@ import 'package:car_shop/core/errors/exception.dart';
 import 'package:car_shop/features/chat/conversations/bloc/conversations_event.dart';
 import 'package:car_shop/features/chat/conversations/bloc/conversations_state.dart';
 import 'package:car_shop/features/chat/domain/model/conversations_update.dart';
+import 'package:car_shop/features/chat/domain/usecase/delete_conversation.dart';
 import 'package:car_shop/features/chat/domain/usecase/get_current_user_id.dart';
 import 'package:car_shop/features/chat/domain/usecase/sync_public_profile.dart';
 import 'package:car_shop/features/chat/domain/usecase/watch_conversations.dart';
@@ -17,6 +18,7 @@ class ConversationsBloc extends Bloc<ConversationsEvent, ConversationsState> {
   final GetCurrentUserId getCurrentUserId;
   final SyncPublicProfile syncPublicProfile;
   final WatchConversations watchConversations;
+  final DeleteConversation deleteConversation;
   final AppErrorCubit appErrorCubit;
 
   static const offlineBannerDelay = Duration(seconds: 2);
@@ -36,13 +38,28 @@ class ConversationsBloc extends Bloc<ConversationsEvent, ConversationsState> {
     required this.getCurrentUserId,
     required this.syncPublicProfile,
     required this.watchConversations,
+    required this.deleteConversation,
     required this.appErrorCubit,
   }) : super(const ConversationsState()) {
     on<ConversationsStarted>((event, emit) => _connect(emit));
     on<ConversationsRetried>((event, emit) => _connect(emit));
+    on<ConversationDeletePressed>(_onDeletePressed);
     on<_ConversationsUpdated>(_onUpdated);
     on<_ConversationsFailed>(_onFailed);
     on<_OfflineDelayElapsed>(_onOfflineDelayElapsed);
+  }
+
+  // The list changes through the stream once the server accepts the delete.
+  Future<void> _onDeletePressed(
+    ConversationDeletePressed event,
+    Emitter<ConversationsState> emit,
+  ) async {
+    if (state.isOffline) return;
+    try {
+      await deleteConversation(event.conversationId);
+    } on AppException catch (e) {
+      appErrorCubit.showError(e.message);
+    }
   }
 
   // Subscribes only with a valid uid; nothing here waits for the sync.

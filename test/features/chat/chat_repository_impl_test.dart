@@ -100,6 +100,25 @@ class _FakeDataSource implements ChatRemoteDataSource {
     readCalls.add(conversationId);
   }
 
+  final deleteMessageCalls = <List<String>>[];
+  final deleteConversationCalls = <String>[];
+  AppException? deleteError;
+
+  @override
+  Future<void> deleteMessage({
+    required String conversationId,
+    required String messageId,
+  }) async {
+    deleteMessageCalls.add([conversationId, messageId]);
+    if (deleteError != null) throw deleteError!;
+  }
+
+  @override
+  Future<void> deleteConversation(String conversationId) async {
+    deleteConversationCalls.add(conversationId);
+    if (deleteError != null) throw deleteError!;
+  }
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -266,6 +285,34 @@ void main() {
       expect(updates.single.conversations.map((c) => c.id), ['visible']);
       expect(updates.single.isFromCache, isTrue);
       await sub.cancel();
+    });
+  });
+
+  group('delete', () {
+    test('deleteMessage and deleteConversation pass through to the datasource', () async {
+      await repo.deleteMessage(conversationId: 'alice_seller', messageId: 'm1');
+      await repo.deleteConversation('alice_seller');
+
+      expect(dataSource.deleteMessageCalls, [
+        ['alice_seller', 'm1'],
+      ]);
+      expect(dataSource.deleteConversationCalls, ['alice_seller']);
+    });
+
+    test('their errors reach the caller unchanged', () async {
+      dataSource.deleteError = AppException(
+        message: 'Message not found',
+        type: ErrorType.notFound,
+      );
+
+      await expectLater(
+        repo.deleteMessage(conversationId: 'alice_seller', messageId: 'm1'),
+        throwsA(isA<AppException>().having((e) => e.type, 'type', ErrorType.notFound)),
+      );
+      await expectLater(
+        repo.deleteConversation('alice_seller'),
+        throwsA(isA<AppException>().having((e) => e.type, 'type', ErrorType.notFound)),
+      );
     });
   });
 

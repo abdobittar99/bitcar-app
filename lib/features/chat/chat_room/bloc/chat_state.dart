@@ -62,6 +62,9 @@ class ChatState {
   bool get canSend =>
       target != null && streamStatus != ChatStreamStatus.failedFatal;
 
+  // Deleting needs a connection (FR-014b) and a working live window (FR-054).
+  bool get canDelete => canSend && !isOffline;
+
   // Offline and the saved older messages have run out; older ones may still exist (FR-043).
   bool get savedMessagesEnded => isOffline && olderBatchIncomplete;
 
@@ -110,6 +113,7 @@ class ChatState {
     DateTime? clearedAt,
     String? draft,
     MessageCursor? oldestCursor,
+    bool clearOldestCursor = false,
     bool? hasOlder,
     bool? isLoadingOlder,
     bool? olderLoadFailed,
@@ -132,7 +136,9 @@ class ChatState {
       otherLastReadAt: otherLastReadAt ?? this.otherLastReadAt,
       clearedAt: clearedAt ?? this.clearedAt,
       draft: draft ?? this.draft,
-      oldestCursor: oldestCursor ?? this.oldestCursor,
+      oldestCursor: clearOldestCursor
+          ? null
+          : oldestCursor ?? this.oldestCursor,
       hasOlder: hasOlder ?? this.hasOlder,
       isLoadingOlder: isLoadingOlder ?? this.isLoadingOlder,
       olderLoadFailed: olderLoadFailed ?? this.olderLoadFailed,

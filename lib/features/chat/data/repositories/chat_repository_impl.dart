@@ -7,7 +7,6 @@ import 'package:car_shop/features/chat/domain/model/messages_page.dart';
 import 'package:car_shop/features/chat/domain/model/messages_update.dart';
 import 'package:car_shop/features/chat/domain/repositories/chat_repository.dart';
 
-// Methods that throw UnimplementedError are filled in by their user-story tasks (tasks.md).
 class ChatRepositoryImpl implements ChatRepository {
   final ChatRemoteDataSource dataSource;
 
@@ -130,11 +129,14 @@ class ChatRepositoryImpl implements ChatRepository {
     required String conversationId,
     required String messageId,
   }) {
-    throw UnimplementedError('deleteMessage: T069/T070');
+    return dataSource.deleteMessage(
+      conversationId: conversationId,
+      messageId: messageId,
+    );
   }
 
   @override
   Future<void> deleteConversation(String conversationId) {
-    throw UnimplementedError('deleteConversation: T069/T070');
+    return dataSource.deleteConversation(conversationId);
   }
 }

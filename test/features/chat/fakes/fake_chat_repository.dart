@@ -39,10 +39,12 @@ class FakeChatRepository implements ChatRepository {
   // When set, these wait for it, so the operation can be kept in flight.
   Completer<void>? fillGate;
   Completer<void>? syncGate;
+  Completer<void>? deleteGate;
 
   // Thrown after the gate, so a failure can arrive after the bloc is closed.
   AppException? fillFailure;
   AppException? syncFailure;
+  AppException? deleteFailure;
 
   // When set, sendMessage waits for it, so a send can be kept in flight.
   Completer<void>? sendGate;
@@ -176,6 +178,9 @@ class FakeChatRepository implements ChatRepository {
     required String messageId,
   }) async {
     _record('deleteMessage', [conversationId, messageId]);
+    await deleteGate?.future;
+    final failure = deleteFailure;
+    if (failure != null) throw failure;
   }
 
   @override

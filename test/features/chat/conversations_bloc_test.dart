@@ -9,6 +9,7 @@ import 'package:car_shop/entities/conversation.dart';
 import 'package:car_shop/features/chat/conversations/bloc/conversations_bloc.dart';
 import 'package:car_shop/features/chat/conversations/bloc/conversations_event.dart';
 import 'package:car_shop/features/chat/domain/model/conversations_update.dart';
+import 'package:car_shop/features/chat/domain/usecase/delete_conversation.dart';
 import 'package:car_shop/features/chat/domain/usecase/get_current_user_id.dart';
 import 'package:car_shop/features/chat/domain/usecase/sync_public_profile.dart';
 import 'package:car_shop/features/chat/domain/usecase/watch_conversations.dart';
@@ -81,6 +82,7 @@ ConversationsBloc buildBloc(
     getCurrentUserId: GetCurrentUserId(repo),
     syncPublicProfile: SyncPublicProfile(repo),
     watchConversations: WatchConversations(repo),
+    deleteConversation: DeleteConversation(repo),
     appErrorCubit: errors,
   );
 }
@@ -371,6 +373,69 @@ void main() {
       await bloc.close();
 
       expect(repo.conversationStreams.single.hasListener, isFalse);
+    });
+  });
+
+  group('delete', () {
+    test('ConversationDeletePressed calls DeleteConversation', () async {
+      bloc.add(ConversationsStarted());
+      await settle();
+      bloc.add(ConversationDeletePressed('alice_seller'));
+      await settle();
+
+      expect(repo.calls['deleteConversation'], [
+        ['alice_seller'],
+      ]);
+    });
+
+    test('the list does not change locally: it follows the stream', () async {
+      bloc.add(ConversationsStarted());
+      await settle();
+      repo.emitConversations(updateOf([conversationOf('alice_seller', 2)]));
+      await settle();
+
+      bloc.add(ConversationDeletePressed('alice_seller'));
+      await settle();
+      expect(bloc.state.conversations.length, 1);
+
+      repo.emitConversations(updateOf(const []));
+      await settle();
+      expect(bloc.state.conversations, isEmpty);
+      expect(bloc.state.totalUnread, 0);
+    });
+
+    test('an error is shown and the list stays', () async {
+      bloc.add(ConversationsStarted());
+      await settle();
+      repo.emitConversations(updateOf([conversationOf('alice_seller', 2)]));
+      await settle();
+      repo.errors['deleteConversation'] = network();
+      bloc.add(ConversationDeletePressed('alice_seller'));
+      await settle();
+
+      expect(errors.shown, ['Service temporarily unavailable']);
+      expect(bloc.state.conversations.length, 1);
+      expect(bloc.state.hasError, isFalse);
+    });
+
+    test('it is ignored while offline', () {
+      fakeAsync((async) {
+        final r = FakeChatRepository();
+        final b = buildBloc(r, FakeHomeRepository(), RecordingErrorCubit());
+        b.add(ConversationsStarted());
+        async.flushMicrotasks();
+        r.emitConversations(updateOf([conversationOf('a', 0)], isFromCache: true));
+        async.flushMicrotasks();
+        async.elapse(const Duration(seconds: 2));
+        expect(b.state.isOffline, isTrue);
+
+        b.add(ConversationDeletePressed('a'));
+        async.flushMicrotasks();
+
+        expect(r.callCount('deleteConversation'), 0);
+        b.close();
+        async.flushMicrotasks();
+      });
     });
   });
 

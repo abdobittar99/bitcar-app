@@ -1,5 +1,6 @@
 import 'package:car_shop/core/enums/message_status.dart';
 import 'package:car_shop/entities/message.dart';
+import 'package:car_shop/shared/components/general_widget/confirm_delete_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -8,18 +9,50 @@ class MessageBubble extends StatelessWidget {
   final bool isOwn;
   // Tapping a failed own message sends it again (FR-014).
   final VoidCallback? onRetry;
+  // Null while deleting is unavailable (offline, live updates failed).
+  final VoidCallback? onDelete;
 
   const MessageBubble({
     super.key,
     required this.message,
     required this.isOwn,
     this.onRetry,
+    this.onDelete,
   });
+
+  // Only own messages the server has confirmed can be deleted (FR-047).
+  bool get _canOfferDelete =>
+      onDelete != null &&
+      isOwn &&
+      !message.isDeleted &&
+      (message.status == MessageStatus.sent ||
+          message.status == MessageStatus.read);
+
+  Future<void> _showDeleteOption(BuildContext context) async {
+    final choseDelete = await showModalBottomSheet<bool>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: ListTile(
+          leading: const Icon(Icons.delete_outline, color: Colors.red),
+          title: const Text('Delete'),
+          onTap: () => Navigator.pop(sheetContext, true),
+        ),
+      ),
+    );
+    if (choseDelete != true || !context.mounted) return;
+    final confirmed = await confirmDelete(
+      context,
+      title: 'Delete message',
+      message: 'Delete this message for everyone?',
+    );
+    if (confirmed == true) onDelete?.call();
+  }
 
   @override
   Widget build(BuildContext context) {
     final createdAt = message.createdAt;
-    final isFailed = isOwn && message.status == MessageStatus.failed;
+    final isDeleted = message.isDeleted;
+    final isFailed = isOwn && !isDeleted && message.status == MessageStatus.failed;
     final textColor = isOwn ? Colors.white : Colors.black87;
     final metaColor = textColor.withValues(alpha: 0.7);
 
@@ -37,7 +70,15 @@ class MessageBubble extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Text(message.text, style: TextStyle(color: textColor)),
+          isDeleted
+              ? Text(
+                  'This message was deleted',
+                  style: TextStyle(
+                    color: metaColor,
+                    fontStyle: FontStyle.italic,
+                  ),
+                )
+              : Text(message.text, style: TextStyle(color: textColor)),
           const SizedBox(height: 2),
           Row(
             mainAxisSize: MainAxisSize.min,
@@ -48,7 +89,7 @@ class MessageBubble extends StatelessWidget {
                   DateFormat.jm().format(createdAt.toLocal()),
                   style: TextStyle(fontSize: 11, color: metaColor),
                 ),
-              if (isOwn) ...[
+              if (isOwn && !isDeleted) ...[
                 const SizedBox(width: 4),
                 _StatusIcon(status: message.status, color: metaColor),
               ],
@@ -66,6 +107,11 @@ class MessageBubble extends StatelessWidget {
         ),
         child: isFailed
             ? GestureDetector(onTap: onRetry, child: bubble)
+            : _canOfferDelete
+            ? GestureDetector(
+                onLongPress: () => _showDeleteOption(context),
+                child: bubble,
+              )
             : bubble,
       ),
     );

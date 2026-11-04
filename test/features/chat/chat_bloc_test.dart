@@ -14,6 +14,7 @@ import 'package:car_shop/features/chat/domain/model/message_cursor.dart';
 import 'package:car_shop/features/chat/domain/model/messages_page.dart';
 import 'package:car_shop/features/chat/domain/model/messages_update.dart';
 import 'package:car_shop/features/chat/domain/usecase/create_message_id.dart';
+import 'package:car_shop/features/chat/domain/usecase/delete_message.dart';
 import 'package:car_shop/features/chat/domain/usecase/fill_own_placeholder_name.dart';
 import 'package:car_shop/features/chat/domain/usecase/get_chat_target.dart';
 import 'package:car_shop/features/chat/domain/usecase/get_current_user_id.dart';
@@ -128,6 +129,7 @@ ChatBloc buildBloc(
     createMessageId: CreateMessageId(repo),
     sendMessage: SendMessage(repo),
     markConversationRead: MarkConversationRead(repo),
+    deleteMessage: DeleteMessage(repo),
     getCurrentUserId: GetCurrentUserId(repo),
     appErrorCubit: errors,
     now: now,
@@ -684,6 +686,336 @@ void main() {
       expect(other.state.hasOlder, isTrue);
       expect(other.state.oldestCursor!.messageId, 'm01');
       expect(other.state.messages.length, 21);
+    });
+  });
+
+  group('delete', () {
+    MessagesUpdate withCleared(
+      List<MessageEntity> messages,
+      DateTime? clearedAt, {
+      bool isFromCache = false,
+    }) => MessagesUpdate(
+      messages: messages,
+      otherLastReadAt: null,
+      unreadCount: 0,
+      clearedAt: clearedAt,
+      isFromCache: isFromCache,
+    );
+
+    MessageEntity byId(String id) =>
+        bloc.state.messages.firstWhere((m) => m.id == id);
+
+    test('deletes an own sent message, and an own read message', () async {
+      final own = range(1, 2, sender: 'alice');
+      await open(own);
+      repo.emitMessages(updateOf(own, otherLastReadAt: base.add(const Duration(minutes: 1))));
+      await settle();
+      expect(byId('m01').status, MessageStatus.read);
+      expect(byId('m02').status, MessageStatus.sent);
+
+      bloc.add(ChatMessageDeletePressed('m01'));
+      bloc.add(ChatMessageDeletePressed('m02'));
+      await settle();
+
+      expect(repo.calls['deleteMessage'], [
+        ['alice_seller', 'm01'],
+        ['alice_seller', 'm02'],
+      ]);
+    });
+
+    test("the other user's message is not deleted", () async {
+      await open(range(1, 1));
+      bloc.add(ChatMessageDeletePressed('m01'));
+      await settle();
+
+      expect(repo.callCount('deleteMessage'), 0);
+    });
+
+    test('an unknown id is ignored', () async {
+      await open(range(1, 1, sender: 'alice'));
+      bloc.add(ChatMessageDeletePressed('missing'));
+      await settle();
+
+      expect(repo.callCount('deleteMessage'), 0);
+    });
+
+    test('sending and failed local messages are not deleted', () async {
+      await open(const []);
+      repo.sendGate = Completer<void>();
+      bloc.add(ChatMessageSubmitted('sending'));
+      await settle();
+      bloc.add(ChatMessageDeletePressed('local-0'));
+      await settle();
+      expect(repo.callCount('deleteMessage'), 0);
+
+      repo.sendFailures['local-0'] = AppException(
+        message: 'No internet connection',
+        type: ErrorType.network,
+      );
+      repo.sendGate!.complete();
+      await settle();
+      expect(bloc.state.pendingMessages['local-0']!.status, MessageStatus.failed);
+      bloc.add(ChatMessageDeletePressed('local-0'));
+      await settle();
+
+      expect(repo.callCount('deleteMessage'), 0);
+    });
+
+    test('an already deleted message is not deleted again', () async {
+      await open([
+        serverMessage('m01', 'alice', base).copyWith(isDeleted: true, text: ''),
+      ]);
+      bloc.add(ChatMessageDeletePressed('m01'));
+      await settle();
+
+      expect(repo.callCount('deleteMessage'), 0);
+    });
+
+    test('two quick deletes of the same message make one request', () async {
+      await open(range(1, 1, sender: 'alice'));
+      repo.deleteGate = Completer<void>();
+      bloc.add(ChatMessageDeletePressed('m01'));
+      bloc.add(ChatMessageDeletePressed('m01'));
+      await settle();
+      expect(repo.callCount('deleteMessage'), 1);
+
+      repo.deleteGate!.complete();
+      await settle();
+    });
+
+    test('nothing changes on screen before the server accepts the delete', () async {
+      await open(range(1, 1, sender: 'alice'));
+      repo.deleteGate = Completer<void>();
+      bloc.add(ChatMessageDeletePressed('m01'));
+      await settle();
+
+      expect(byId('m01').isDeleted, isFalse);
+      expect(byId('m01').text, 'text m01');
+
+      repo.deleteGate!.complete();
+      await settle();
+      expect(byId('m01').isDeleted, isTrue);
+      expect(byId('m01').text, '');
+    });
+
+    test('on success the message stays in its position', () async {
+      await open(range(1, 3, sender: 'alice'));
+      bloc.add(ChatMessageDeletePressed('m02'));
+      await settle();
+
+      expect(bloc.state.messages.map((m) => m.id), ['m01', 'm02', 'm03']);
+      expect(byId('m02').isDeleted, isTrue);
+    });
+
+    test('a message outside the live window updates too (only in loadedMessages)', () async {
+      await open(range(21, 40));
+      repo.olderPages.add(pageOf(range(1, 20, sender: 'alice'), hasOlder: false));
+      bloc.add(ChatLoadOlderRequested());
+      await settle();
+      expect(bloc.state.liveMessages.containsKey('m05'), isFalse);
+
+      bloc.add(ChatMessageDeletePressed('m05'));
+      await settle();
+
+      expect(bloc.state.loadedMessages['m05']!.isDeleted, isTrue);
+      expect(byId('m05').text, '');
+      expect(byId('m06').isDeleted, isFalse);
+    });
+
+    test('an error is shown and the message stays as it was', () async {
+      await open(range(1, 1, sender: 'alice'));
+      repo.deleteFailure = AppException(
+        message: 'You do not have permission to perform this action',
+        type: ErrorType.permission,
+      );
+      bloc.add(ChatMessageDeletePressed('m01'));
+      await settle();
+
+      expect(errors.shown, ['You do not have permission to perform this action']);
+      expect(byId('m01').isDeleted, isFalse);
+      expect(byId('m01').text, 'text m01');
+
+      // The error did not block a later attempt.
+      repo.deleteFailure = null;
+      bloc.add(ChatMessageDeletePressed('m01'));
+      await settle();
+      expect(repo.callCount('deleteMessage'), 2);
+      expect(byId('m01').isDeleted, isTrue);
+    });
+
+    test('canDelete is false offline, and the delete is ignored', () {
+      fakeAsync((async) {
+        final r = FakeChatRepository();
+        final b = buildBloc(r, RecordingErrorCubit());
+        b.add(ChatStarted.fromCar(carOf()));
+        async.flushMicrotasks();
+        r.emitMessages(updateOf(range(1, 1, sender: 'alice'), isFromCache: true));
+        async.flushMicrotasks();
+        expect(b.state.canDelete, isTrue);
+
+        async.elapse(const Duration(seconds: 2));
+        expect(b.state.isOffline, isTrue);
+        expect(b.state.canDelete, isFalse);
+        b.add(ChatMessageDeletePressed('m01'));
+        async.flushMicrotasks();
+
+        expect(r.callCount('deleteMessage'), 0);
+        b.close();
+        async.flushMicrotasks();
+      });
+    });
+
+    test('canDelete is false in failedFatal, and the delete is ignored', () async {
+      await open(range(1, 1, sender: 'alice'));
+      repo.failMessages(
+        AppException(message: 'You do not have permission', type: ErrorType.permission),
+      );
+      await settle();
+      expect(bloc.state.streamStatus, ChatStreamStatus.failedFatal);
+      expect(bloc.state.canDelete, isFalse);
+
+      bloc.add(ChatMessageDeletePressed('m01'));
+      await settle();
+
+      expect(repo.callCount('deleteMessage'), 0);
+    });
+
+    group('clearedAt', () {
+      final cut = base.add(const Duration(minutes: 30));
+
+      test('an advance removes confirmed messages at or before it, and keeps newer and local ones', () async {
+        await open(range(21, 40));
+        repo.olderPages.add(pageOf(range(1, 20), hasOlder: false));
+        bloc.add(ChatLoadOlderRequested());
+        await settle();
+        repo.sendGate = Completer<void>();
+        bloc.add(ChatMessageSubmitted('still sending'));
+        await settle();
+
+        repo.emitMessages(withCleared(range(31, 40), cut));
+        await settle();
+
+        final ids = bloc.state.messages.map((m) => m.id).toList();
+        expect(ids.contains('m01'), isFalse);
+        expect(ids.contains('m30'), isFalse, reason: 'createdAt equal to clearedAt is hidden');
+        expect(ids.contains('m31'), isTrue);
+        expect(ids.last, 'local-0');
+        expect(bloc.state.pendingMessages.containsKey('local-0'), isTrue);
+        repo.sendGate!.complete();
+      });
+
+      test('a failed local message stays too', () async {
+        await open(range(1, 3));
+        repo.errors['sendMessage'] = AppException(
+          message: 'No internet connection',
+          type: ErrorType.network,
+        );
+        bloc.add(ChatMessageSubmitted('failed'));
+        await settle();
+
+        repo.emitMessages(withCleared(const [], base.add(const Duration(hours: 1))));
+        await settle();
+
+        expect(bloc.state.messages.map((m) => m.id), ['local-0']);
+        expect(bloc.state.messages.single.status, MessageStatus.failed);
+      });
+
+      test('the cursor moves to the oldest remaining message', () async {
+        await open(range(21, 40));
+        repo.olderPages.add(pageOf(range(1, 20), hasOlder: true));
+        bloc.add(ChatLoadOlderRequested());
+        await settle();
+        expect(bloc.state.oldestCursor!.messageId, 'm01');
+
+        repo.emitMessages(withCleared(range(31, 40), cut));
+        await settle();
+
+        expect(bloc.state.oldestCursor!.messageId, 'm31');
+        expect(bloc.state.hasOlder, isFalse);
+      });
+
+      test('with nothing left the cursor is cleared and no request can start', () async {
+        await open(range(1, 3));
+        repo.emitMessages(withCleared(const [], base.add(const Duration(hours: 1))));
+        await settle();
+
+        expect(bloc.state.messages, isEmpty);
+        expect(bloc.state.oldestCursor, isNull);
+        expect(bloc.state.hasOlder, isFalse);
+
+        bloc.add(ChatLoadOlderRequested());
+        await settle();
+        expect(repo.callCount('loadOlderMessages'), 0);
+      });
+
+      test('a full window after the advance can still have older messages', () async {
+        await open(range(21, 40));
+        repo.emitMessages(
+          withCleared(range(21, 40), base.add(const Duration(minutes: 5))),
+        );
+        await settle();
+
+        expect(bloc.state.hasOlder, isTrue);
+        expect(bloc.state.oldestCursor!.messageId, 'm21');
+      });
+
+      test('it resets a failed or incomplete older batch', () async {
+        await open(range(21, 40));
+        repo.errors['loadOlderMessages'] = AppException(
+          message: 'No internet connection',
+          type: ErrorType.network,
+        );
+        bloc.add(ChatLoadOlderRequested());
+        await settle();
+        expect(bloc.state.olderLoadFailed, isTrue);
+
+        repo.emitMessages(withCleared(range(31, 40), cut));
+        await settle();
+
+        expect(bloc.state.olderLoadFailed, isFalse);
+        expect(bloc.state.olderBatchIncomplete, isFalse);
+      });
+
+      test('an older batch arriving after the advance adds nothing and does not move the cursor', () async {
+        await open(range(21, 40));
+        repo.olderPages.add(pageOf(range(1, 20), hasOlder: true));
+        repo.olderGate = Completer<void>();
+        bloc.add(ChatLoadOlderRequested());
+        await settle();
+
+        repo.emitMessages(withCleared(range(31, 40), cut));
+        await settle();
+        repo.olderGate!.complete();
+        await settle();
+
+        final ids = bloc.state.messages.map((m) => m.id);
+        expect(ids.first, 'm31');
+        expect(bloc.state.loadedMessages.containsKey('m05'), isFalse);
+        expect(bloc.state.oldestCursor!.messageId, 'm31');
+        expect(bloc.state.isLoadingOlder, isFalse);
+      });
+
+      test('the next older batch starts after the new clearedAt', () async {
+        final earlier = base.add(const Duration(minutes: 5));
+        await open(range(21, 40));
+        repo.emitMessages(withCleared(range(21, 40), earlier));
+        await settle();
+        bloc.add(ChatLoadOlderRequested());
+        await settle();
+
+        expect(repo.calls['loadOlderMessages']!.single[2], earlier);
+      });
+
+      test('an unchanged clearedAt removes nothing', () async {
+        await open(const []);
+        repo.emitMessages(withCleared(range(31, 40), cut));
+        await settle();
+        repo.emitMessages(withCleared(range(32, 41), cut));
+        await settle();
+
+        expect(bloc.state.loadedMessages.containsKey('m31'), isTrue);
+        expect(bloc.state.messages.length, 11);
+      });
     });
   });
 

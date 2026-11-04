@@ -360,6 +360,121 @@ class ChatRemoteDataSource {
     }
   }
 
+  // One extra attempt only for permission-denied: the rules compare with the current data, so a
+  // concurrent change refuses a stale write, and transactions do not retry that by themselves
+  // (research D19). A real denial fails again and reaches the caller.
+  static Future<T> retryOnceOnPermissionDenied<T>(
+    Future<T> Function() attempt,
+  ) async {
+    try {
+      return await attempt();
+    } on FirebaseException catch (e) {
+      if (e.code != 'permission-denied') rethrow;
+      return attempt();
+    }
+  }
+
+  // Same comparison as rules isUnseenBy: a message the user has read or cleared is not unread.
+  static bool isUnseen(
+    Timestamp createdAt, {
+    Timestamp? lastReadAt,
+    Timestamp? clearedAt,
+  }) {
+    return (lastReadAt == null || createdAt.compareTo(lastReadAt) > 0) &&
+        (clearedAt == null || createdAt.compareTo(clearedAt) > 0);
+  }
+
+  // Delete for everyone, one commit with the proof the rules require (research D19): the message,
+  // lastDeletedMessageId, the preview only if it is the latest message, and the other user's
+  // unread count only if they have not seen it. Each attempt is a new transaction with fresh reads.
+  Future<void> deleteMessage({
+    required String conversationId,
+    required String messageId,
+  }) async {
+    final uid = currentUserId;
+    final convRef = _conversation(conversationId);
+    final msgRef = _messages(conversationId).doc(messageId);
+    try {
+      await sessionGate.run(
+        () => retryOnceOnPermissionDenied(
+          () => firestore.runTransaction((tx) async {
+            final conv = (await tx.get(convRef)).data();
+            final message = conv == null ? null : (await tx.get(msgRef)).data();
+            if (conv == null || message == null) {
+              throw AppException(
+                message: 'Message not found',
+                type: ErrorType.notFound,
+              );
+            }
+            if (message['deleted'] == true) return;
+            if (message['senderId'] != uid) {
+              throw AppException(
+                message: 'You can only delete your own messages',
+                type: ErrorType.permission,
+              );
+            }
+
+            final other = (conv['participants'] as List<dynamic>)
+                .map((e) => e.toString())
+                .firstWhere((p) => p != uid);
+            final update = <String, dynamic>{'lastDeletedMessageId': messageId};
+            final lastMessage = conv['lastMessage'] as Map<String, dynamic>?;
+            if (lastMessage?['id'] == messageId) {
+              update['lastMessage'] = {
+                'id': messageId,
+                'text': '',
+                'senderId': uid,
+                'deleted': true,
+              };
+            }
+            final unread = conv['unreadCount'] as Map<String, dynamic>?;
+            final lastReadAt = conv['lastReadAt'] as Map<String, dynamic>?;
+            final clearedAt = conv['clearedAt'] as Map<String, dynamic>?;
+            final seen = !isUnseen(
+              message['createdAt'] as Timestamp,
+              lastReadAt: lastReadAt?[other] as Timestamp?,
+              clearedAt: clearedAt?[other] as Timestamp?,
+            );
+            if (!seen && ((unread?[other] as num?) ?? 0) > 0) {
+              update['unreadCount.$other'] = FieldValue.increment(-1);
+            }
+
+            tx.update(msgRef, {'deleted': true, 'text': ''});
+            tx.update(convRef, update);
+          }),
+        ),
+      );
+    } catch (e) {
+      throw ErrorMapper.map(e);
+    }
+  }
+
+  // One-sided delete (FR-027a). A transaction, so it fails instead of staying queued offline
+  // (FR-014b). It writes only own entries: no message and nothing of the other participant.
+  Future<void> deleteConversation(String conversationId) async {
+    final uid = currentUserId;
+    final convRef = _conversation(conversationId);
+    try {
+      await sessionGate.run(
+        () => firestore.runTransaction((tx) async {
+          final conv = await tx.get(convRef);
+          if (!conv.exists) {
+            throw AppException(
+              message: 'Conversation not found',
+              type: ErrorType.notFound,
+            );
+          }
+          tx.update(convRef, {
+            'clearedAt.$uid': FieldValue.serverTimestamp(),
+            'unreadCount.$uid': 0,
+          });
+        }),
+      );
+    } catch (e) {
+      throw ErrorMapper.map(e);
+    }
+  }
+
   Future<String> _publicNameIn(Transaction tx, String uid) async {
     final doc = await tx.get(firestore.collection('publicProfiles').doc(uid));
     return doc.data()?['displayName'] as String? ?? placeholderName;

@@ -15,6 +15,8 @@ import 'package:car_shop/features/chat/domain/repositories/chat_repository.dart'
 import 'package:car_shop/features/chat/chat_room/bloc/chat_bloc.dart';
 import 'package:car_shop/features/chat/conversations/bloc/conversations_bloc.dart';
 import 'package:car_shop/features/chat/domain/usecase/create_message_id.dart';
+import 'package:car_shop/features/chat/domain/usecase/delete_conversation.dart';
+import 'package:car_shop/features/chat/domain/usecase/delete_message.dart';
 import 'package:car_shop/features/chat/domain/usecase/fill_own_placeholder_name.dart';
 import 'package:car_shop/features/chat/domain/usecase/get_chat_target.dart';
 import 'package:car_shop/features/chat/domain/usecase/get_current_user_id.dart';
@@ -231,6 +233,8 @@ Future<void> init() async {
   sl.registerLazySingleton(() => WatchConversations(sl()));
   sl.registerLazySingleton(() => GetChatTarget(sl()));
   sl.registerLazySingleton(() => FillOwnPlaceholderName(sl()));
+  sl.registerLazySingleton(() => DeleteMessage(sl()));
+  sl.registerLazySingleton(() => DeleteConversation(sl()));
 
   sl.registerFactory(
     () => ConversationsBloc(
@@ -238,6 +242,7 @@ Future<void> init() async {
       getCurrentUserId: sl(),
       syncPublicProfile: sl(),
       watchConversations: sl(),
+      deleteConversation: sl(),
       appErrorCubit: sl(),
     ),
   );
@@ -252,6 +257,7 @@ Future<void> init() async {
       createMessageId: sl(),
       sendMessage: sl(),
       markConversationRead: sl(),
+      deleteMessage: sl(),
       getCurrentUserId: sl(),
       appErrorCubit: sl(),
     ),

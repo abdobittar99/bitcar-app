@@ -65,6 +65,11 @@ class ConversationsScreen extends StatelessWidget {
                             key: ValueKey(conversation.id),
                             conversation: conversation,
                             onTap: () => _open(context, conversation.id),
+                            onDelete: state.isOffline
+                                ? null
+                                : () => context.read<ConversationsBloc>().add(
+                                    ConversationDeletePressed(conversation.id),
+                                  ),
                           );
                         },
                       ),

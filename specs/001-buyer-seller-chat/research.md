@@ -476,7 +476,12 @@ reads; a real denial simply fails twice.
 **Verification (2026-11-04, emulator, experimental rules copy outside the project)**: 32 attacks refused, 7 legitimate
 deletes allowed including the full transaction, and other conversation writes still pass next to the new field. Of the
 existing rules tests, the only failure is the delete test using the old write shape. The retry was then tested as a
-JavaScript copy of the T069 steps (`chat_delete.rules.test.js`); the Dart code belongs to T069.
+JavaScript copy of the T069 steps (`chat_delete.rules.test.js`); the Dart code belongs to T069. The project's rules
+suite then passed 165/165 on the emulator.
+
+**Status: closed in production on 2026-11-04**. Deployed with the owner's explicit approval from commit `e94300a`
+(ruleset `f5ae6bcf-a13c-4bc3-b047-4e565cda37d7`); the released rules read back identical to `firestore.rules`. The
+owner then passed the device check and Q15 with accounts O and M (admin) against the deployed rules.
 
 **Limits accepted**: a sender may still lower the count by deleting their own unseen message, which is the feature. The
 exact-value check means a client bug is refused rather than silently miscounting.

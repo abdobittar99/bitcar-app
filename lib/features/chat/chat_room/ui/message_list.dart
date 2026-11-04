@@ -20,6 +20,8 @@ class MessageList extends StatefulWidget {
   final VoidCallback onReachTop;
   final VoidCallback onRetryOlder;
   final ValueChanged<String> onRetryMessage;
+  final bool canDelete;
+  final ValueChanged<String>? onDeleteMessage;
 
   static const topThreshold = 200.0;
   static const bottomThreshold = 100.0;
@@ -31,6 +33,8 @@ class MessageList extends StatefulWidget {
     required this.onReachTop,
     required this.onRetryOlder,
     required this.onRetryMessage,
+    this.canDelete = false,
+    this.onDeleteMessage,
     this.hasOlder = false,
     this.isLoadingOlder = false,
     this.olderLoadFailed = false,
@@ -261,6 +265,9 @@ class _MessageListState extends State<MessageList> {
       message: message,
       isOwn: message.senderId == widget.currentUserId,
       onRetry: () => widget.onRetryMessage(message.id),
+      onDelete: widget.canDelete && widget.onDeleteMessage != null
+          ? () => widget.onDeleteMessage!(message.id)
+          : null,
     );
     return Column(
       key: ValueKey(message.id),
