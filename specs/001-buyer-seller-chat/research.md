@@ -428,3 +428,61 @@ unchanged) and wipe it on sign-out with `terminate()` + `clearPersistence()`; wa
 FR-014b, and changes existing screens); wiping inside `logOut()` without a gate (listeners and in-flight calls can
 restart the instance between `terminate` and `clearPersistence`); wiping after `signOut()` (listeners first receive
 `permission-denied`, and the login screen is already usable).
+
+### D19. Proof of deletion for the unread count (decision R6, owner approved 2026-11-04)
+
+**Finding (T066 review)**: rule `isDeleteMessageUpdate` lets a participant lower the other user's `unreadCount` by one
+with no message deleted, and repeat it down to 0. Reproduced on the emulator. Only the conversation's two participants
+can do it, so FR-032 and SC-008 hold, but contract case R6 did not: its test changed `lastReadAt` in the same write and
+was refused for that other reason.
+
+**Decision**: every delete for everyone writes `lastDeletedMessageId: mid` on the conversation in the same commit as the
+message, and the rules on both documents check each other.
+
+**Why the field is needed**: rules cannot see the other writes of a commit or search a collection; `get()` and
+`getAfter()` need a full document path, and a conversation update otherwise carries no message id when the deleted
+message is not the latest. `lastMessage.id` cannot serve, since it must keep naming the latest message. The only way
+to avoid a new field is to drop the unread adjustment, which the owner rejected.
+
+**How `get()` and `getAfter()` work here**: in one transaction or batch, `get()` returns the state before the whole
+commit and `getAfter()` the state as if all its writes succeeded, and the commit is all-or-nothing. A refused rule on
+either document therefore refuses both writes.
+
+**Conditions**:
+
+| Requirement | Enforced by |
+|---|---|
+| No unread change without a real delete in this conversation | Conversation rule: `lastDeletedMessageId` must change; the path is built from `cid`; `get` shows `deleted == false`, `getAfter` shows `deleted == true` |
+| Caller may delete that message | Both rules: `senderId == uid()` |
+| Each message counts once | `deleted == false` before the commit; a deleted message can never pass again |
+| Unread falls only for an unseen message | Exact value: old − 1 if `createdAt` is later than the other user's `lastReadAt` and `clearedAt` and old > 0, otherwise old |
+| The field and the count cannot change separately | Every other update branch excludes `lastDeletedMessageId`, and this branch requires it to change |
+| Message and conversation change together | Message rule: `getAfter(conversation).lastDeletedMessageId == mid` |
+| Preview cannot keep deleted text | Latest message: `lastMessage` must equal the deleted form; older message: must stay unchanged |
+
+**Preventing reuse or tampering of the id**: it proves nothing by itself. Keeping the stored value fails the "must
+change" condition; naming a message that is already deleted, belongs to someone else, is missing, or is in another
+conversation fails its conditions; deleting a second message in the commit fails the message rule, which requires its
+own id. The stale value left on the conversation grants nothing, since that message is already deleted.
+
+**Why `clearedAt` counts as seen**: a clear sets the user's unread to 0 without moving `lastReadAt`. Without this check,
+deleting a message from before the clear would lower the count of newer messages the user has not seen.
+
+**Stale writes**: the rules compare with the current data, and Firestore answers `permission-denied` before its
+contention check, so the transaction does not retry by itself (research D4). If the recipient reads the chat or a new
+message arrives between the read and the commit, the delete is refused. `deleteMessage` retries **once** with fresh
+reads; a real denial simply fails twice.
+
+**Verification (2026-11-04, emulator, experimental rules copy outside the project)**: 32 attacks refused, 7 legitimate
+deletes allowed including the full transaction, and other conversation writes still pass next to the new field. Of the
+existing rules tests, the only failure is the delete test using the old write shape. The retry was then tested as a
+JavaScript copy of the T069 steps (`chat_delete.rules.test.js`); the Dart code belongs to T069.
+
+**Limits accepted**: a sender may still lower the count by deleting their own unseen message, which is the feature. The
+exact-value check means a client bug is refused rather than silently miscounting.
+
+**Spark**: rules only; no Cloud Functions, no index, no migration (the field is optional).
+
+**Alternatives**: drop the adjustment (the count could include a deleted message; rejected); only document the
+behavior (the gap stays; rejected); a marker document per deletion (more writes and another collection, no extra
+guarantee).

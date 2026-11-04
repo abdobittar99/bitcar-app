@@ -5,6 +5,7 @@ const ALICE = 'alice'; // buyer
 const SELLER = 'seller'; // seller, owns car1
 const OTHER = 'other'; // unrelated buyer
 const ADMIN = 'admin'; // admin role
+const SELLER2 = 'seller2'; // seller role, outside the A–S conversation
 const CID = `${ALICE}_${SELLER}`; // sorted pair id
 
 const NAMES = {
@@ -12,6 +13,7 @@ const NAMES = {
   [SELLER]: 'Sam Seller',
   [OTHER]: 'Olivia Other',
   [ADMIN]: 'Mia Admin',
+  [SELLER2]: 'Noor Seller',
 };
 
 function userDoc(id, role) {
@@ -23,6 +25,7 @@ async function seedUsers(db, { withProfiles = [ALICE, SELLER] } = {}) {
   await setDoc(doc(db, 'users', SELLER), userDoc(SELLER, 'seller'));
   await setDoc(doc(db, 'users', OTHER), userDoc(OTHER, 'buyer'));
   await setDoc(doc(db, 'users', ADMIN), userDoc(ADMIN, 'admin'));
+  await setDoc(doc(db, 'users', SELLER2), userDoc(SELLER2, 'seller'));
   for (const id of withProfiles) {
     await setDoc(doc(db, 'publicProfiles', id), { displayName: NAMES[id] });
   }
@@ -78,6 +81,7 @@ module.exports = {
   SELLER,
   OTHER,
   ADMIN,
+  SELLER2,
   CID,
   NAMES,
   seedUsers,

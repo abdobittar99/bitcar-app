@@ -4,6 +4,7 @@ const { assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
 const {
   doc,
   collection,
+  collectionGroup,
   getDoc,
   getDocs,
   setDoc,
@@ -22,7 +23,7 @@ const {
   Timestamp,
 } = require('firebase/firestore');
 const { authed, unauthed, seed, clear, cleanup } = require('./helpers');
-const { ALICE, SELLER, OTHER, ADMIN, CID, NAMES, seedUsers, seedConversation } = require('./fixtures');
+const { ALICE, SELLER, OTHER, ADMIN, SELLER2, CID, NAMES, seedUsers, seedConversation } = require('./fixtures');
 
 const PLACEHOLDER = 'BitCar user';
 
@@ -151,6 +152,7 @@ describe('chat allowed paths', () => {
       const batch = writeBatch(db);
       batch.update(doc(db, 'conversations', CID, 'messages', 'm2'), { deleted: true, text: '' });
       batch.update(doc(db, 'conversations', CID), {
+        lastDeletedMessageId: 'm2',
         lastMessage: { id: 'm2', text: '', senderId: SELLER, deleted: true },
         [`unreadCount.${ALICE}`]: increment(-1),
       });
@@ -368,5 +370,86 @@ describe('chat denied paths', () => {
     await assertFails(firstSendBatch(db, { text: '   ' }).commit());
     await assertFails(firstSendBatch(db, { text: 'x'.repeat(1001) }).commit());
     await assertSucceeds(firstSendBatch(db, { text: 'x'.repeat(1000) }).commit());
+  });
+});
+
+// T066: every role outside the conversation, on every path, one operation per assertion.
+describe('participant-only access (FR-032 to FR-034, SC-008)', () => {
+  beforeEach(() => seed(seedConversation));
+
+  const conversation = (db) => doc(db, 'conversations', CID);
+  const message = (db, id) => doc(db, 'conversations', CID, 'messages', id);
+
+  for (const [role, outsider] of [['buyer', OTHER], ['seller', SELLER2], ['admin', ADMIN]]) {
+    describe(`non-participant with the ${role} role`, () => {
+      it('cannot read the conversation or its messages', async () => {
+        const db = await authed(outsider);
+        await assertFails(getDoc(conversation(db)));
+        await assertFails(getDoc(message(db, 'm1')));
+        await assertFails(getDocs(collection(db, 'conversations', CID, 'messages')));
+      });
+
+      it('cannot list conversations: no filter, or filtered on a participant', async () => {
+        const db = await authed(outsider);
+        await assertFails(getDocs(collection(db, 'conversations')));
+        await assertFails(getDocs(query(collection(db, 'conversations'), where('participants', 'array-contains', ALICE))));
+      });
+
+      it('cannot reach messages through a collection group query', async () => {
+        await assertFails(getDocs(collectionGroup(await authed(outsider), 'messages')));
+      });
+
+      it('cannot create a message, on its own or with the conversation update', async () => {
+        const db = await authed(outsider);
+        await assertFails(setDoc(message(db, 'x'), { senderId: outsider, text: 'hi', createdAt: serverTimestamp(), deleted: false }));
+        await assertFails(sendBatch(db, { me: outsider, other: SELLER }).commit());
+      });
+
+      it('cannot update the conversation', async () => {
+        const db = await authed(outsider);
+        await assertFails(updateDoc(conversation(db), { [`unreadCount.${outsider}`]: 0, [`lastReadAt.${outsider}`]: serverTimestamp() }));
+        await assertFails(updateDoc(conversation(db), { 'lastMessage.text': 'changed' }));
+      });
+
+      it('cannot update or delete a message, or delete the conversation', async () => {
+        const db = await authed(outsider);
+        await assertFails(updateDoc(message(db, 'm1'), { deleted: true, text: '' }));
+        await assertFails(deleteDoc(message(db, 'm1')));
+        await assertFails(deleteDoc(conversation(db)));
+      });
+    });
+  }
+
+  describe('signed-out client', () => {
+    it('cannot list conversations', async () => {
+      await assertFails(getDocs(query(collection(await unauthed(), 'conversations'), where('participants', 'array-contains', ALICE))));
+    });
+
+    it('cannot update the conversation', async () => {
+      await assertFails(updateDoc(conversation(await unauthed()), { 'lastMessage.text': 'changed' }));
+    });
+
+    it('cannot create, update or delete a message', async () => {
+      const db = await unauthed();
+      await assertFails(setDoc(message(db, 'x'), { senderId: ALICE, text: 'hi', createdAt: serverTimestamp(), deleted: false }));
+      await assertFails(updateDoc(message(db, 'm1'), { deleted: true, text: '' }));
+      await assertFails(deleteDoc(message(db, 'm1')));
+    });
+  });
+
+  describe('sender identity', () => {
+    it('the sender of an existing message cannot be changed, alone or during a delete', async () => {
+      const db = await authed(ALICE);
+      await assertFails(updateDoc(message(db, 'm1'), { senderId: SELLER }));
+      const batch = writeBatch(db);
+      batch.update(message(db, 'm1'), { deleted: true, text: '', senderId: SELLER });
+      batch.update(conversation(db), { lastDeletedMessageId: 'm1' });
+      await assertFails(batch.commit());
+    });
+
+    it('the sender of the preview cannot be changed by either participant', async () => {
+      await assertFails(updateDoc(conversation(await authed(ALICE)), { 'lastMessage.senderId': ALICE }));
+      await assertFails(updateDoc(conversation(await authed(SELLER)), { 'lastMessage.senderId': ALICE }));
+    });
   });
 });

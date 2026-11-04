@@ -213,26 +213,39 @@ service cloud.firestore {
         && d.lastReadAt.get(otherOf(p), null) == oldRead.get(otherOf(p), null);
     }
 
-    // Delete for everyone: the preview may only turn into the placeholder of the caller's own message,
-    // and the other participant's unread count may drop by at most one.
+    // A message counts as unread for u only if it is newer than what u has read and than u's own clear.
+    function isUnseenBy(createdAt, u) {
+      let read = resource.data.get('lastReadAt', {});
+      let cleared = resource.data.get('clearedAt', {});
+      return (!(u in read) || createdAt > read[u]) && (!(u in cleared) || createdAt > cleared[u]);
+    }
+
+    // Exact unread value required after deleting a message of the caller.
+    function unreadAfterDelete(createdAt, u) {
+      let old = resource.data.get('unreadCount', {}).get(u, 0);
+      return (isUnseenBy(createdAt, u) && old > 0) ? old - 1 : old;
+    }
+
+    // Delete for everyone: lastDeletedMessageId names the one message this write deletes. It must have been the
+    // caller's undeleted message before the commit and be deleted after it (research D19).
     function isDeleteMessageUpdate(cid) {
       let d = request.resource.data;
       let p = resource.data.participants;
-      let oldUnread = resource.data.get('unreadCount', {});
-      let newOther = d.unreadCount.get(otherOf(p), 0);
-      let oldOther = oldUnread.get(otherOf(p), 0);
-      return changedKeys().hasOnly(['lastMessage', 'unreadCount'])
+      let mid = d.lastDeletedMessageId;
+      let before = get(msgPath(cid, mid)).data;
+      return changedKeys().hasAll(['lastDeletedMessageId'])
+        && changedKeys().hasOnly(['lastDeletedMessageId', 'lastMessage', 'unreadCount'])
+        && mid is string
+        && exists(msgPath(cid, mid))
+        && before.senderId == uid()
+        && before.deleted == false
+        && getAfter(msgPath(cid, mid)).data.deleted == true
         && d.unreadCount.keys().hasOnly(p)
-        && d.unreadCount.get(uid(), 0) == oldUnread.get(uid(), 0)
-        && (newOther == oldOther || (newOther == oldOther - 1 && newOther >= 0))
-        && (d.lastMessage == resource.data.lastMessage
-          || (resource.data.lastMessage.senderId == uid()
-            && d.lastMessage.keys().hasOnly(['id', 'text', 'senderId', 'deleted'])
-            && d.lastMessage.id == resource.data.lastMessage.id
-            && d.lastMessage.senderId == uid()
-            && d.lastMessage.deleted == true
-            && d.lastMessage.text == ''
-            && getAfter(msgPath(cid, d.lastMessage.id)).data.deleted == true));
+        && d.unreadCount.get(uid(), 0) == resource.data.get('unreadCount', {}).get(uid(), 0)
+        && d.unreadCount.get(otherOf(p), 0) == unreadAfterDelete(before.createdAt, otherOf(p))
+        && (resource.data.lastMessage.id == mid
+          ? d.lastMessage == {'id': mid, 'text': '', 'senderId': uid(), 'deleted': true}
+          : d.lastMessage == resource.data.lastMessage);
     }
 
     // One-sided delete (FR-027a): own clearedAt to now and own unread to 0.
@@ -297,7 +310,8 @@ service cloud.firestore {
           && resource.data.deleted == false
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deleted', 'text'])
           && request.resource.data.deleted == true
-          && request.resource.data.text == '';
+          && request.resource.data.text == ''
+          && getAfter(convPath(cid)).data.get('lastDeletedMessageId', null) == mid;
         allow delete: if false;
       }
     }

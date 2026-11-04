@@ -19,7 +19,7 @@ datasource; push is deferred ([future-push-notifications.md](future-push-notific
 | `String newMessageId(String conversationId)` | id | Local id generation, no network | – |
 | `Future<void> sendMessage({required String conversationId, required String messageId, required String otherUserId, required String text})` | – | Transaction of research D4; on first message also creates the conversation with both name snapshots; idempotent for the same `messageId` | `validation` (rate limit: "You're sending messages too fast, try again shortly"; length), network, permission |
 | `Future<void> markConversationRead(String conversationId)` | – | Own `unreadCount` → 0, own `lastReadAt` → server time; no-op if already 0 | network, permission |
-| `Future<void> deleteMessage({required String conversationId, required String messageId})` | – | Delete for everyone + preview/unread fix-up (FR-027) | permission, network |
+| `Future<void> deleteMessage({required String conversationId, required String messageId})` | – | Delete for everyone + preview/unread fix-up in one transaction, with `lastDeletedMessageId` (FR-027, research D19). An already deleted message is a success with no write. A `permission-denied` is retried **once** with fresh reads, because the rules compare with the current data and a concurrent change refuses a stale write | permission, network, `notFound` |
 | `Future<void> deleteConversation(String conversationId)` | – | Own `clearedAt` → server time, own unread → 0 (FR-027a) | permission, network |
 
 ## Use cases (`domain/usecase/`, one action each, single `call`)

@@ -205,8 +205,13 @@ jumps to the top with preview, time and badge; opening clears the badge
 
 **Independent Test**: quickstart Q15 plus the rules suite
 
-- [ ] T066 [US6] Final review of `firestore_tests/chat.rules.test.js` against FR-032–FR-034 (cases written in T009): non-participant (buyer, seller and **admin** roles) `get`/`list`/create/update on a conversation and its messages; a participant forging `senderId`; a participant deleting the other user's message; signed-out access. Add only what is missing; run the suite in the **Firebase Emulator Terminal**
+- [X] T066 [US6] Final review of `firestore_tests/chat.rules.test.js` against FR-032–FR-034 (cases written in T009): non-participant (buyer, seller and **admin** roles) `get`/`list`/create/update on a conversation and its messages; a participant forging `senderId`; a participant deleting the other user's message; signed-out access. Add only what is missing; run the suite in the **Firebase Emulator Terminal**
 - [ ] T067 [US6] Run quickstart Q15 with accounts O and M (admin) against the emulator or the deployed rules and report any deviation in the implementation notes
+
+**Decision R6 (2026-11-04, owner approved; no new tasks, no renumbering)**: the T066 review found that a participant
+can lower the other user's unread count with no message deleted. The fix of research D19 is part of T066: rules cases
+R21–R29 and the changed delete rule, with the existing allowed-path delete test updated to the new write. Deploying
+it needs the owner's explicit approval at that moment, and must happen before T069 is used on a device.
 
 **Checkpoint**: SC-008 satisfied (0 non-participant accesses)
 
@@ -224,7 +229,7 @@ jumps to the top with preview, time and badge; opening clears the badge
 
 ### Implementation for User Story 5
 
-- [ ] T069 [US5] In `chat_remote_datasource.dart` implement, through `sessionGate.run`, `deleteMessage(cid, mid)` as a transaction: message `deleted: true`, `text: ""`; if `lastMessage.id == mid` set `lastMessage.deleted: true`, `lastMessage.text: ""`; if the recipient had not read it (`createdAt > lastReadAt[other]`) decrement `unreadCount.<other>` (never below 0); and `deleteConversation(cid)`: `clearedAt.<uid>` = server time, `unreadCount.<uid>` = 0
+- [ ] T069 [US5] In `chat_remote_datasource.dart` implement, through `sessionGate.run`, `deleteMessage(cid, mid)` as a transaction, per research D19 (needs the D19 rules deployed first): read the conversation and the message; missing message → `AppException(message: 'Message not found', type: ErrorType.notFound)`; already `deleted` → return with no write; otherwise in one commit: message `deleted: true`, `text: ""`; conversation `lastDeletedMessageId: mid`; if `lastMessage.id == mid` set `lastMessage` to `{id: mid, text: "", senderId: uid, deleted: true}`, and never touch it otherwise; if the recipient has not seen it (`createdAt` later than both `lastReadAt[other]` and `clearedAt[other]`) and `unreadCount[other] > 0`, write `unreadCount.<other>: FieldValue.increment(-1)`, and never touch it otherwise. A `permission-denied` is retried **once** with fresh reads, then mapped with `ErrorMapper`; and `deleteConversation(cid)`: `clearedAt.<uid>` = server time, `unreadCount.<uid>` = 0
 - [ ] T070 [US5] Implement both in `chat_repository_impl.dart`; create use cases `lib/features/chat/domain/usecase/delete_message.dart` (`DeleteMessage`) and `delete_conversation.dart` (`DeleteConversation`)
 - [ ] T071 [P] [US5] In `lib/shared/components/general_widget/confirm_delete_dialog.dart` add optional named `title` and `message` parameters defaulting to `'Delete car'` and `'Are you sure you want to delete this car?'` so existing callers are unchanged
 - [ ] T072 [US5] In `message_bubble.dart` show "This message was deleted" for deleted messages; on long press of an own, non-deleted message open a bottom sheet with "Delete" → `confirmDelete(context, title: 'Delete message', message: 'Delete this message for everyone?')` → `ChatMessageDeletePressed`; no option on the other user's messages; disabled while offline (FR-047, FR-014b)
