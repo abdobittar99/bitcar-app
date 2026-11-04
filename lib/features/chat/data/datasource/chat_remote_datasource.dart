@@ -4,6 +4,7 @@ import 'package:car_shop/core/enums/error_type.dart';
 import 'package:car_shop/core/errors/exception.dart';
 import 'package:car_shop/core/errors/mapper/error_mapper.dart';
 import 'package:car_shop/core/session/session_gate.dart';
+import 'package:car_shop/core/validators/chat_validator.dart';
 import 'package:car_shop/models/conversation_model.dart';
 import 'package:car_shop/models/message_model.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -24,6 +25,12 @@ typedef LatestMessagesRecord = ({
   bool isFromCache,
 });
 
+typedef OlderMessagesRecord = ({
+  List<MessageModel> messages,
+  bool hasOlder,
+  bool isFromCache,
+});
+
 // The only chat class that talks to Firestore and Auth. Returns models (or records of models),
 // never domain types; ChatRepositoryImpl builds the domain wrappers (constitution I).
 class ChatRemoteDataSource {
@@ -34,9 +41,8 @@ class ChatRemoteDataSource {
   ChatRemoteDataSource(this.firestore, this.auth, this.sessionGate);
 
   static const placeholderName = 'BitCar user';
-  static const maxMessagesPerWindow = 20;
-  static const rateLimitMessage =
-      "You're sending messages too fast, try again shortly";
+  static const maxMessagesPerWindow = ChatValidator.maxMessagesPerMinute;
+  static const rateLimitMessage = ChatValidator.rateLimitMessage;
 
   String get currentUserId {
     final user = auth.currentUser;
@@ -183,7 +189,9 @@ class ChatRemoteDataSource {
           if (!rate.exists) {
             tx.set(rateRef, {'count': 1, 'windowStart': now});
           } else if (count < maxMessagesPerWindow) {
-            tx.update(rateRef, {'count': count + 1});
+            // increment, not count + 1: the rules compare with the current count, so a stale
+            // absolute value from a concurrent send would be refused instead of retried.
+            tx.update(rateRef, {'count': FieldValue.increment(1)});
           } else {
             // The rules accept a new window only 60 s after windowStart (request.time).
             startsNewWindow = true;
@@ -199,6 +207,62 @@ class ChatRemoteDataSource {
         );
       }
       throw ErrorMapper.map(e);
+    } catch (e) {
+      throw ErrorMapper.map(e);
+    }
+  }
+
+  // One-time read of the batch just older than the cursor (research D17). The cursor is built
+  // from plain values; startAfterDocument is never used. Falls back to the cache offline: a
+  // cache-only result never ends the history.
+  Future<OlderMessagesRecord> loadOlderMessages(
+    String conversationId, {
+    required DateTime beforeCreatedAt,
+    required String beforeMessageId,
+    DateTime? after,
+    required int pageSize,
+  }) async {
+    try {
+      final snap = await sessionGate.run(() {
+        Query<Map<String, dynamic>> query = _messages(conversationId);
+        if (after != null) {
+          query = query.where(
+            'createdAt',
+            isGreaterThan: Timestamp.fromDate(after),
+          );
+        }
+        return query
+            .orderBy('createdAt', descending: true)
+            .orderBy(FieldPath.documentId, descending: true)
+            .startAfter([Timestamp.fromDate(beforeCreatedAt), beforeMessageId])
+            .limit(pageSize)
+            .get();
+      });
+      final isFromCache = snap.metadata.isFromCache;
+      return (
+        messages: snap.docs.reversed
+            .map((d) => MessageModel.fromMap(d.data(), d.id, conversationId))
+            .toList(),
+        hasOlder: isFromCache || snap.docs.length == pageSize,
+        isFromCache: isFromCache,
+      );
+    } catch (e) {
+      throw ErrorMapper.map(e);
+    }
+  }
+
+  // Own unread to 0 and own lastReadAt to server time (rules isMarkRead). The bloc calls this
+  // only when the live window reports own unreadCount > 0 from the server, so an already-read
+  // conversation is never written.
+  Future<void> markConversationRead(String conversationId) async {
+    final uid = currentUserId;
+    try {
+      await sessionGate.run(
+        () => _conversation(conversationId).update({
+          'unreadCount.$uid': 0,
+          'lastReadAt.$uid': FieldValue.serverTimestamp(),
+        }),
+      );
     } catch (e) {
       throw ErrorMapper.map(e);
     }

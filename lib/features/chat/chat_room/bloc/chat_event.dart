@@ -20,3 +20,21 @@ class ChatMessageSubmitted extends ChatEvent {
   final String text;
   ChatMessageSubmitted(this.text);
 }
+
+// Re-sends a failed message with the same id, so it is never duplicated (FR-014).
+class ChatMessageRetried extends ChatEvent {
+  final String messageId;
+  ChatMessageRetried(this.messageId);
+}
+
+// From the app lifecycle: messages are marked read only while the chat is on screen.
+class ChatVisibilityChanged extends ChatEvent {
+  final bool isVisible;
+  ChatVisibilityChanged(this.isVisible);
+}
+
+// The list reached the top, or the user tapped Retry on the top row (FR-038, FR-043).
+class ChatLoadOlderRequested extends ChatEvent {}
+
+// Retry button or the single automatic retry after a live window failure (FR-054).
+class ChatRetried extends ChatEvent {}

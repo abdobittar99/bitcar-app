@@ -15,6 +15,8 @@ import 'package:car_shop/features/chat/domain/repositories/chat_repository.dart'
 import 'package:car_shop/features/chat/chat_room/bloc/chat_bloc.dart';
 import 'package:car_shop/features/chat/domain/usecase/create_message_id.dart';
 import 'package:car_shop/features/chat/domain/usecase/get_current_user_id.dart';
+import 'package:car_shop/features/chat/domain/usecase/load_older_messages.dart';
+import 'package:car_shop/features/chat/domain/usecase/mark_conversation_read.dart';
 import 'package:car_shop/features/chat/domain/usecase/open_chat_with_seller.dart';
 import 'package:car_shop/features/chat/domain/usecase/send_message.dart';
 import 'package:car_shop/features/chat/domain/usecase/sync_public_profile.dart';
@@ -219,13 +221,17 @@ Future<void> init() async {
   sl.registerLazySingleton(() => CreateMessageId(sl()));
   sl.registerLazySingleton(() => SendMessage(sl()));
   sl.registerLazySingleton(() => WatchLatestMessages(sl()));
+  sl.registerLazySingleton(() => LoadOlderMessages(sl()));
+  sl.registerLazySingleton(() => MarkConversationRead(sl()));
 
   sl.registerFactory(
     () => ChatBloc(
       openChatWithSeller: sl(),
       watchLatestMessages: sl(),
+      loadOlderMessages: sl(),
       createMessageId: sl(),
       sendMessage: sl(),
+      markConversationRead: sl(),
       getCurrentUserId: sl(),
       appErrorCubit: sl(),
     ),

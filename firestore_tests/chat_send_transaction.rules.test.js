@@ -69,7 +69,7 @@ function sendMessage(db, me, other, mid, text) {
     if (!rate.exists()) {
       tx.set(rateRef, { count: 1, windowStart: serverTimestamp() });
     } else if (count < 20) {
-      tx.update(rateRef, { count: count + 1 });
+      tx.update(rateRef, { count: increment(1) });
     } else {
       tx.set(rateRef, { count: 1, windowStart: serverTimestamp() });
     }
@@ -142,6 +142,24 @@ describe('US1 send transaction', () => {
     const { conv, messages } = await readAll();
     assert.deepEqual(messages, ['fromAlice', 'fromSeller']);
     assert.ok([ALICE, SELLER].includes(conv.buyerId));
+  });
+
+  it('one user sending several messages at the same time: all succeed and each is counted', async () => {
+    const db = await authed(ALICE);
+    await assertSucceeds(sendMessage(db, ALICE, SELLER, 'first', 'Hello'));
+
+    await Promise.all(
+      ['a', 'b', 'c', 'd', 'e'].map((mid) => assertSucceeds(sendMessage(db, ALICE, SELLER, mid, mid))),
+    );
+
+    const { conv, messages } = await readAll();
+    assert.equal(messages.length, 6);
+    assert.equal(conv.unreadCount[SELLER], 6);
+    let count;
+    await seed(async (admin) => {
+      count = (await getDoc(doc(admin, 'chatRateLimits', ALICE))).data().count;
+    });
+    assert.equal(count, 6);
   });
 
   it('a seller without a public profile is stored with the placeholder name', async () => {

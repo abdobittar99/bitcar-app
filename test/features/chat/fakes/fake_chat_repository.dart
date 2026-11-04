@@ -33,6 +33,15 @@ class FakeChatRepository implements ChatRepository {
   // Results returned by loadOlderMessages, in order.
   final List<MessagesPage> olderPages = [];
 
+  // When set, loadOlderMessages waits for it, so a request can be kept in flight.
+  Completer<void>? olderGate;
+
+  // When set, sendMessage waits for it, so a send can be kept in flight.
+  Completer<void>? sendGate;
+
+  // Message id -> exception that send throws, once.
+  final Map<String, AppException> sendFailures = {};
+
   int _nextId = 0;
 
   int callCount(String method) => calls[method]?.length ?? 0;
@@ -112,6 +121,7 @@ class FakeChatRepository implements ChatRepository {
     required int pageSize,
   }) async {
     _record('loadOlderMessages', [conversationId, before, after, pageSize]);
+    await olderGate?.future;
     return olderPages.isEmpty
         ? MessagesPage(messages: const [], hasOlder: false, isFromCache: false)
         : olderPages.removeAt(0);
@@ -131,6 +141,9 @@ class FakeChatRepository implements ChatRepository {
     required String text,
   }) async {
     _record('sendMessage', [conversationId, messageId, otherUserId, text]);
+    await sendGate?.future;
+    final failure = sendFailures.remove(messageId);
+    if (failure != null) throw failure;
   }
 
   @override

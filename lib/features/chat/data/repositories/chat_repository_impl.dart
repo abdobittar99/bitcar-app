@@ -66,8 +66,19 @@ class ChatRepositoryImpl implements ChatRepository {
     required MessageCursor before,
     DateTime? after,
     required int pageSize,
-  }) {
-    throw UnimplementedError('loadOlderMessages: T048/T050');
+  }) async {
+    final r = await dataSource.loadOlderMessages(
+      conversationId,
+      beforeCreatedAt: before.createdAt,
+      beforeMessageId: before.messageId,
+      after: after,
+      pageSize: pageSize,
+    );
+    return MessagesPage(
+      messages: List<MessageEntity>.unmodifiable(r.messages),
+      hasOlder: r.hasOlder,
+      isFromCache: r.isFromCache,
+    );
   }
 
   @override
@@ -92,7 +103,7 @@ class ChatRepositoryImpl implements ChatRepository {
 
   @override
   Future<void> markConversationRead(String conversationId) {
-    throw UnimplementedError('markConversationRead: T049/T050');
+    return dataSource.markConversationRead(conversationId);
   }
 
   @override

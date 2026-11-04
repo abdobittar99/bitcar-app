@@ -5,6 +5,7 @@ import 'package:car_shop/core/enums/message_status.dart';
 import 'package:car_shop/core/errors/exception.dart';
 import 'package:car_shop/features/chat/data/datasource/chat_remote_datasource.dart';
 import 'package:car_shop/features/chat/data/repositories/chat_repository_impl.dart';
+import 'package:car_shop/features/chat/domain/model/message_cursor.dart';
 import 'package:car_shop/features/chat/domain/model/messages_update.dart';
 import 'package:car_shop/models/message_model.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -52,6 +53,26 @@ class _FakeDataSource implements ChatRemoteDataSource {
   ) {
     watchCalls.add([conversationId, pageSize]);
     return controller.stream;
+  }
+
+  final olderCalls = <List<Object?>>[];
+  final readCalls = <String>[];
+
+  @override
+  Future<OlderMessagesRecord> loadOlderMessages(
+    String conversationId, {
+    required DateTime beforeCreatedAt,
+    required String beforeMessageId,
+    DateTime? after,
+    required int pageSize,
+  }) async {
+    olderCalls.add([conversationId, beforeCreatedAt, beforeMessageId, after, pageSize]);
+    return (messages: <MessageModel>[], hasOlder: true, isFromCache: true);
+  }
+
+  @override
+  Future<void> markConversationRead(String conversationId) async {
+    readCalls.add(conversationId);
   }
 
   @override
@@ -159,6 +180,33 @@ void main() {
           ),
         ),
       );
+    });
+  });
+
+  group('older messages and read state', () {
+    test('loadOlderMessages unpacks the cursor and builds a MessagesPage', () async {
+      final createdAt = DateTime(2026, 11, 1, 10);
+      final clearedAt = DateTime(2026, 10, 1);
+
+      final page = await repo.loadOlderMessages(
+        conversationId: 'alice_seller',
+        before: MessageCursor(createdAt: createdAt, messageId: 'm21'),
+        after: clearedAt,
+        pageSize: 20,
+      );
+
+      expect(dataSource.olderCalls, [
+        ['alice_seller', createdAt, 'm21', clearedAt, 20],
+      ]);
+      expect(page.messages, isEmpty);
+      expect(page.hasOlder, isTrue);
+      expect(page.isFromCache, isTrue);
+    });
+
+    test('markConversationRead passes through to the datasource', () async {
+      await repo.markConversationRead('alice_seller');
+
+      expect(dataSource.readCalls, ['alice_seller']);
     });
   });
 

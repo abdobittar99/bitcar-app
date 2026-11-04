@@ -67,6 +67,12 @@ All findings below were checked against the current code in this repository, not
   already exists; otherwise writes the message, `lastMessage`, `lastMessageAt`, `unreadCount[recipient] + 1`, and the
   rate-limit doc.
 - **Rationale**: Retry with the same id never duplicates (FR-014). Transactions need a connection, matching FR-014b.
+- **Concurrent sends (found in B7 device testing, 2026-11-04)**: same-window rate-limit updates use
+  `FieldValue.increment(1)`. An absolute `count + 1` from a stale read is refused by the rules with
+  `permission-denied`, which the client does not retry (reproduced on the emulator: 1 of 5 concurrent sends
+  succeeded; with `increment`, 5 of 5). The bloc also sends one message at a time per screen, which keeps the send
+  order and avoids competing transactions. Trade-off: on a very slow connection queued messages wait their turn
+  and stay `sending` longer.
 - **States**: `sending`/`failed` are local bloc state; `sent` = present in the server-confirmed stream; `read` = derived
   from `lastReadAt`.
 

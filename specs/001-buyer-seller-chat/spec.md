@@ -420,7 +420,9 @@ notifications for it is deferred with User Story 4.)
   existing error display (FR-031), and a retry action at the top that requests the same batch; (c)
   once the oldest message is loaded, a "beginning of the conversation" indicator, with no further
   requests. Without a connection, the screen MUST NOT claim the beginning was reached unless it is
-  known; it shows the offline indication (FR-014b) instead.
+  known; it shows the offline indication (FR-014b) instead, and at the end of the messages kept on
+  the device a plain-language row saying no more saved messages are available until the connection
+  returns (owner decision 2026-11-04).
 - **FR-044**: While the conversation is open, the 20 most recent messages MUST stay live: new
   messages, deletions (FR-027) and read-state changes appear without reloading. Read state (FR-015)
   MUST stay live for every loaded message. Older messages are loaded once: a deletion of a message

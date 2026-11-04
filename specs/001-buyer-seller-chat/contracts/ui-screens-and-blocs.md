@@ -80,7 +80,7 @@ State (`ConversationsState`, `copyWith`): `isLoading`, `hasError`, `isOffline`, 
 |---|---|---|
 | `ChatStarted.fromCar(car)` | public | `OpenChatWithSeller(car.sellerId)`; set input draft to the inquiry text (FR-007); subscribe live window (`WatchLatestMessages`, 20) |
 | `ChatStarted.fromConversation(cid)` | public | `GetChatTarget(cid)`; empty draft (FR-009); subscribe live window (`WatchLatestMessages`, 20) |
-| `ChatMessageSubmitted(text)` | public | Validate (trim, 1–1,000; client rate pre-check); add optimistic `sending` message with `CreateMessageId`; `SendMessage`; on `AppException` → mark `failed` + `showError` |
+| `ChatMessageSubmitted(text)` | public | Validate (trim, 1–1,000; client rate pre-check); add optimistic `sending` message with `CreateMessageId`; `SendMessage`, one at a time in request order (a retry joins the same queue; a failure does not stop the next send; queued sends continue after the screen closes); on `AppException` → mark `failed` + `showError` |
 | `ChatMessageRetried(messageId)` | public | Re-send the same id (FR-014) |
 | `ChatMessageDeletePressed(messageId)` | public | `DeleteMessage` after UI confirmation |
 | `ChatLoadOlderRequested` | public | Sent when the list reaches the top, and by the retry action. Ignored if `isLoadingOlder`, `!hasOlder` or no cursor (FR-042). Otherwise emits `isLoadingOlder: true, olderLoadFailed: false` **before** the first `await`, then `LoadOlderMessages(cid, oldestCursor)`. Success: add to `loadedMessages`, move the cursor to the oldest loaded server-confirmed message, set `hasOlder` (stays true for a cache-only short batch, with `olderBatchIncomplete: true`). `AppException`: `olderLoadFailed: true`, `showError`, cursor unchanged (FR-043b). Always `isLoadingOlder: false` at the end |
@@ -93,8 +93,25 @@ State (`ChatState`, `copyWith`): `isLoading`, `isOffline`, `target` (`ChatTarget
 (`!target.exists && messages.isEmpty`, FR-004), `liveMessages`, `loadedMessages`, `pendingMessages` (each an
 id-keyed map of `MessageEntity`), `otherLastReadAt`, `draft`, `oldestCursor`, `hasOlder`, `isLoadingOlder`,
 `olderLoadFailed`, `olderBatchIncomplete`, `isVisible`, `currentUserId`, `streamStatus`
-(`enum ChatStreamStatus { live, retrying, failedRetryable, failedFatal }`, declared in `chat_state.dart`), and
-`autoRetryUsed` (bool).
+(`enum ChatStreamStatus { live, retrying, failedRetryable, failedFatal }`, declared in `chat_state.dart`),
+`autoRetryUsed` (bool), and (added in implementation, B7):
+
+| Field | Type | Purpose |
+|---|---|---|
+| `clearedAt` | `DateTime?` | Own `clearedAt` from the latest `MessagesUpdate`; passed as `after` to `LoadOlderMessages` so older batches never return messages from before a one-sided delete (FR-027a, research D17) |
+| `streamError` | `String?` | Text of the live window error (`AppException.message`) set by `_MessagesFailed` and cleared by the next `_MessagesUpdated`; the `failedFatal` banner shows it (the snackbar still shows the error once through `AppErrorCubit`) (FR-054) |
+| `outgoingCount` | `int` | Increased by every `ChatMessageSubmitted` and accepted `ChatMessageRetried`; `message_list.dart` scrolls to the newest message whenever it changes (FR-046). A counter, so two sends in a row are two distinct signals |
+
+Getter `canSend` = `target != null && streamStatus != failedFatal`; it disables the input bar and is also checked
+by the bloc before sending or retrying (FR-054).
+
+`isOffline` becomes true only after the live window has reported cached data for 2 s without server data
+(Firestore delivers cached data first even when online); any server update sets it back to false at once.
+
+Getter `savedMessagesEnded` = `isOffline && olderBatchIncomplete`: the top row of `message_list.dart` shows
+"No more saved messages. Connect to load older ones." instead of the "beginning" label (FR-043).
+`ChatLoadOlderRequested` is ignored while `olderBatchIncomplete` and the latest update is from the cache; the next
+server update requests the batch again.
 
 Getter `messages`: union by id (live > loaded > pending), own messages marked `read` when
 `createdAt <= otherLastReadAt` (FR-044), sorted by `(createdAt, id)`, local pending/failed last (FR-039, FR-040).
