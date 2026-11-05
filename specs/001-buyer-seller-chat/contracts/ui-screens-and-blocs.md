@@ -14,7 +14,7 @@
 
 | Existing bloc | Change |
 |---|---|
-| `HomeBloc` (`features/home/bloc/home_bloc.dart`) | Inject `HasPendingWrites`. `LogoutPressed` → if pending writes: `showUnsyncedWarning: true` (dialog in `HomeLayout`: Cancel → `LogoutCancelled`, Log out → `LogoutConfirmed`); else sign-out. Sign-out sets `isSigningOut: true` (blocking "Signing out…" view) and calls `LogOut` (gate close → `terminate` → `clearPersistence` → `signOut`, research D18). `if (isClosed) return;` before every emit after an `await` (FR-052, FR-053) |
+| `HomeBloc` (`features/home/bloc/home_bloc.dart`) | Inject `HasPendingWrites` and `PrepareSignOut`. `LogoutPressed`, ignored while `isCheckingPendingWrites`, while the marker is being saved, or while `isSigningOut` → the Logout button in `profile_screen.dart` shows progress during the check → if pending writes: `showUnsyncedWarning: true` (dialog in `HomeLayout`: Cancel → `LogoutCancelled`, Log out → `LogoutConfirmed`); else sign-out. Sign-out first awaits `PrepareSignOut` (saves the marker): if it fails, the error is shown, `isSigningOut` is never set, `LogOut` is not called, and the user stays signed in with nothing changed. Only after it succeeds: `isSigningOut: true` (blocking "Signing out…" view) and `LogOut` (gate close → `terminate` → `clearPersistence` → `signOut` → marker off → gate open, research D18 step 3). Any kill after the view appears finishes at the next start. `LogOut` `AppException` → `showError`, `isSigningOut: false`; if `signOut` failed, Firestore stays blocked until the app restarts. `if (isClosed) return;` before every emit after an `await` (FR-052, FR-053) |
 | `ProfileBloc` (`features/profile/bloc/profile_bloc.dart`) | Inject `SyncPublicProfile`. In `_onUpdated`, after `updateUserProfile` succeeds and `fullName` changed, call `syncPublicProfile(result.fullName)` (sync point 2). If it throws `AppException`, show it via `appErrorCubit` but keep `isSuccess: true` (the profile itself was saved); sync point 1 repairs it on next app start |
 
 ## Screens (new)
@@ -33,7 +33,7 @@ alignment/colour, time, status icon, deleted placeholder, retry on failed), `mes
 
 | Requirement | UI contract |
 |---|---|
-| FR-047 delete gesture | `message_bubble.dart`: `onLongPress` only on own, non-deleted messages → bottom sheet with "Delete" → `confirmDelete(context, title: 'Delete message', message: 'Delete this message for everyone?')` → `ChatMessageDeletePressed` |
+| FR-047 delete gesture | `message_bubble.dart`: `onLongPress` only on own messages with status `sent` or `read`, and only while `canDelete` (never on `sending`, `failed`, deleted or the other user's messages) → bottom sheet with "Delete" → `confirmDelete(context, title: 'Delete message', message: 'Delete this message for everyone?')` → `ChatMessageDeletePressed` |
 | FR-048 time format | `intl` `DateFormat.jm()` in bubbles; day separator items in `message_list.dart` ("Today", "Yesterday", `DateFormat.yMMMd()`); list tile: `jm()` for today, `yMMMd()` otherwise. Times use the device's local time zone |
 | FR-049 accessibility | `Semantics(label: ...)` on status icons ("Sending", "Sent", "Read", "Failed, tap to retry"), the red dot ("Unread messages"), the top pagination row; no fixed-height text containers, so system text scaling wraps instead of clipping |
 | FR-050 draft | `ChatStarted.fromCar` always sets `draft` to the inquiry text, replacing any previous value |
@@ -65,27 +65,29 @@ Navigation is plain `Navigator.push(MaterialPageRoute(...))` as elsewhere; back 
 
 | Event | Kind | Effect |
 |---|---|---|
-| `ConversationsStarted` | public | `GetCurrentUser` → `SyncPublicProfile(user.fullName)` (sync point 1: app opened after sign-in; failure shown via `AppErrorCubit`, chat continues); subscribe `WatchConversations` |
-| `ConversationDeletePressed(cid)` | public | `DeleteConversation` |
-| `ConversationsRetried` | public | Re-subscribe after an error |
-| `_ConversationsUpdated(update)` | internal | Emit list, `isFromCache`, `totalUnread` |
+| `ConversationsStarted` | public | `GetCurrentUser`, then subscribe `WatchConversations` at once and run `SyncPublicProfile(user.fullName)` in parallel without waiting (sync point 1: app opened after sign-in). Sync errors are handled inside that operation, so none is unhandled: `network` is not shown (the next app open repeats the sync), any other goes to `AppErrorCubit`; the list is unaffected in both cases; after `close()` nothing is shown. If `GetCurrentUser` fails: error shown, sync skipped. The list subscribes only with a valid uid: from `GetCurrentUser`, or else from the auth session (`GetCurrentUserId`); with neither, no Firestore query runs and `hasError: true` |
+| `ConversationDeletePressed(cid)` | public | Ignored while `isOffline`. `DeleteConversation`; `AppException` → `showError`. The list changes through the stream, not locally |
+| `ConversationsRetried` | public | Ignored while connecting or subscribed. If the sync has not started, repeats `GetCurrentUser` first (a success runs the skipped sync); then subscribes under the same uid rule. If the sync already started, only re-subscribes |
+| `_ConversationsUpdated(update)` | internal | Emit list and `totalUnread`. Cached data starts the 2 s offline timer if it is not running; server data cancels it and sets `isOffline: false` |
+| `_OfflineDelayElapsed` | internal | Sets `isOffline: true` if the latest update is still from the cache |
 | `_ConversationsFailed(error)` | internal | `appErrorCubit.showError`, `hasError: true`, `isLoading: false` |
 
 State (`ConversationsState`, `copyWith`): `isLoading`, `hasError`, `isOffline`, `conversations`, `totalUnread`.
-`close()` cancels the subscription.
+`isOffline` uses the same 2 s delay as `ChatBloc`, because Firestore delivers cached data first even when online.
+`close()` cancels the subscription and the offline timer.
 
 ## `ChatBloc` (`chat_room/bloc/`)
 
 | Event | Kind | Effect |
 |---|---|---|
 | `ChatStarted.fromCar(car)` | public | `OpenChatWithSeller(car.sellerId)`; set input draft to the inquiry text (FR-007); subscribe live window (`WatchLatestMessages`, 20) |
-| `ChatStarted.fromConversation(cid)` | public | `GetChatTarget(cid)`; empty draft (FR-009); subscribe live window (`WatchLatestMessages`, 20) |
-| `ChatMessageSubmitted(text)` | public | Validate (trim, 1–1,000; client rate pre-check); add optimistic `sending` message with `CreateMessageId`; `SendMessage`; on `AppException` → mark `failed` + `showError` |
+| `ChatStarted.fromConversation(cid)` | public | `GetChatTarget(cid)`; empty draft (FR-009); subscribe live window (`WatchLatestMessages`, 20). If `target.ownNameIsPlaceholder`: run `FillOwnPlaceholderName(cid)` without waiting, handling its errors inside that operation: `network` not shown (the next open repeats it), any other through `AppErrorCubit`, and nothing after the bloc is closed; the chat is unaffected in all cases |
+| `ChatMessageSubmitted(text)` | public | Validate (trim, 1–1,000; client rate pre-check); add optimistic `sending` message with `CreateMessageId`; `SendMessage`, one at a time in request order (a retry joins the same queue; a failure does not stop the next send; queued sends continue after the screen closes); on `AppException` → mark `failed` + `showError` |
 | `ChatMessageRetried(messageId)` | public | Re-send the same id (FR-014) |
-| `ChatMessageDeletePressed(messageId)` | public | `DeleteMessage` after UI confirmation |
+| `ChatMessageDeletePressed(messageId)` | public | After UI confirmation. Ignored unless `canDelete` and the message is own with status `sent` or `read`. `DeleteMessage`; only after it succeeds, set `isDeleted: true` and empty text in `liveMessages` and `loadedMessages`, keeping its position, so a message outside the live window also updates (FR-027). `AppException` → `showError`, message unchanged |
 | `ChatLoadOlderRequested` | public | Sent when the list reaches the top, and by the retry action. Ignored if `isLoadingOlder`, `!hasOlder` or no cursor (FR-042). Otherwise emits `isLoadingOlder: true, olderLoadFailed: false` **before** the first `await`, then `LoadOlderMessages(cid, oldestCursor)`. Success: add to `loadedMessages`, move the cursor to the oldest loaded server-confirmed message, set `hasOlder` (stays true for a cache-only short batch, with `olderBatchIncomplete: true`). `AppException`: `olderLoadFailed: true`, `showError`, cursor unchanged (FR-043b). Always `isLoadingOlder: false` at the end |
 | `ChatVisibilityChanged(isVisible)` | public | From app lifecycle; mark-read only while visible |
-| `_MessagesUpdated(update)` | internal | Live window emission: messages that were in `liveMessages` but are no longer in the window move to `loadedMessages` (kept on screen); replace `liveMessages`; drop pending messages whose id arrived; store `otherLastReadAt`; on the first emission set `hasOlder` (= window has 20) and the cursor; if `olderBatchIncomplete` and the update is from the server → re-send `ChatLoadOlderRequested`; if visible and `unreadCount > 0` → `MarkConversationRead` (FR-015, FR-020) |
+| `_MessagesUpdated(update)` | internal | Live window emission: messages that were in `liveMessages` but are no longer in the window move to `loadedMessages` (kept on screen); replace `liveMessages`; drop pending messages whose id arrived; store `otherLastReadAt`; on the first emission set `hasOlder` (= window has 20) and the cursor; if `olderBatchIncomplete` and the update is from the server → re-send `ChatLoadOlderRequested`; if visible and `unreadCount > 0` → `MarkConversationRead` (FR-015, FR-020). When own `clearedAt` advances (a delete from another device, FR-027a): remove confirmed messages with `createdAt <= clearedAt` from live and loaded, keep newer and pending/failed ones; `oldestCursor` = oldest remaining confirmed message or null, `hasOlder` from the new window, `olderBatchIncomplete` and `olderLoadFailed` false; an older batch arriving later adds nothing at or before `clearedAt`; `message_list.dart` picks a new anchor if its anchor was removed |
 | `_MessagesFailed(error)` | internal | Live window error (terminal for that listener): clear the subscription; move `liveMessages` into `loadedMessages` (nothing disappears); `showError` once; `isLoading: false`; `streamStatus` = `failedRetryable` for `network`/`firestore`/`unknown`/`platform`/`server`/`cache`, `failedFatal` for `permission`/`notFound`/`auth`/`validation`. For `failedRetryable`, schedule **one** automatic `ChatRetried` after 3 s (timer cancelled in `close()`) (FR-054) |
 | `ChatRetried` | public | Retry button or the automatic retry. Ignored unless `streamStatus == failedRetryable` and no subscription exists. Emits `streamStatus: retrying`, cancels any leftover subscription, subscribes `WatchLatestMessages` again; the first update sets `streamStatus: live` and is merged by id (no duplicates, cursor unchanged). A new failure → `_MessagesFailed` again (no further automatic retry) |
 
@@ -93,8 +95,29 @@ State (`ChatState`, `copyWith`): `isLoading`, `isOffline`, `target` (`ChatTarget
 (`!target.exists && messages.isEmpty`, FR-004), `liveMessages`, `loadedMessages`, `pendingMessages` (each an
 id-keyed map of `MessageEntity`), `otherLastReadAt`, `draft`, `oldestCursor`, `hasOlder`, `isLoadingOlder`,
 `olderLoadFailed`, `olderBatchIncomplete`, `isVisible`, `currentUserId`, `streamStatus`
-(`enum ChatStreamStatus { live, retrying, failedRetryable, failedFatal }`, declared in `chat_state.dart`), and
-`autoRetryUsed` (bool).
+(`enum ChatStreamStatus { live, retrying, failedRetryable, failedFatal }`, declared in `chat_state.dart`),
+`autoRetryUsed` (bool), and (added in implementation, B7):
+
+| Field | Type | Purpose |
+|---|---|---|
+| `clearedAt` | `DateTime?` | Own `clearedAt` from the latest `MessagesUpdate`; passed as `after` to `LoadOlderMessages` so older batches never return messages from before a one-sided delete (FR-027a, research D17) |
+| `streamError` | `String?` | Text of the live window error (`AppException.message`) set by `_MessagesFailed` and cleared by the next `_MessagesUpdated`; the `failedFatal` banner shows it (the snackbar still shows the error once through `AppErrorCubit`) (FR-054) |
+| `outgoingCount` | `int` | Increased by every `ChatMessageSubmitted` and accepted `ChatMessageRetried`; `message_list.dart` scrolls to the newest message whenever it changes (FR-046). A counter, so two sends in a row are two distinct signals |
+
+Getter `canSend` = `target != null && streamStatus != failedFatal`; it disables the input bar and is also checked
+by the bloc before sending or retrying (FR-054).
+
+Getter `canDelete` = `canSend && !isOffline`; it hides the Delete option and is also checked by the bloc (FR-014b,
+FR-054). `isOffline` appears only after 2 s, so a delete in that gap fails with a clear error, and nothing is queued
+because it is a transaction.
+
+`isOffline` becomes true only after the live window has reported cached data for 2 s without server data
+(Firestore delivers cached data first even when online); any server update sets it back to false at once.
+
+Getter `savedMessagesEnded` = `isOffline && olderBatchIncomplete`: the top row of `message_list.dart` shows
+"No more saved messages. Connect to load older ones." instead of the "beginning" label (FR-043).
+`ChatLoadOlderRequested` is ignored while `olderBatchIncomplete` and the latest update is from the cache; the next
+server update requests the batch again.
 
 Getter `messages`: union by id (live > loaded > pending), own messages marked `read` when
 `createdAt <= otherLastReadAt` (FR-044), sorted by `(createdAt, id)`, local pending/failed last (FR-039, FR-040).
@@ -110,6 +133,7 @@ The bloc holds exactly one subscription (the live window); `close()` cancels it.
 | List error | `EmptyState` with "Retry" button → `ConversationsRetried` |
 | New conversation | Header hint "Start the conversation with <name>" above the empty message area |
 | Offline | `offline_banner.dart` at the top; send shows failed state; delete actions disabled |
+| Deleted message | "This message was deleted" in place, with the time and no status icon; no long-press option |
 | Live updates failed (FR-054) | Loaded messages stay. `failedRetryable`: banner under the app bar "Live updates stopped." with **Retry** (`ChatRetried`), progress while `retrying`. `failedFatal`: banner with the error text and no Retry; sending and deleting disabled |
 | Older messages loading / failed / beginning reached | Top row of `message_list.dart` (progress / "Retry" / "Beginning of the conversation"); offline with a cache-only page → offline banner, no "beginning" label |
 | Errors | Always via `AppErrorCubit` / `AppErrorListener` snackbar |

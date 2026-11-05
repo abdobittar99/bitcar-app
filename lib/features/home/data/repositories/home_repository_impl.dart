@@ -16,4 +16,19 @@ class HomeRepositoryImpl implements HomeRepository {
   Future<void> logOut() {
     return remote.logOut();
   }
+
+  @override
+  Future<bool> hasPendingWrites() {
+    return remote.hasPendingWrites();
+  }
+
+  @override
+  Future<void> prepareSignOut() {
+    return remote.prepareSignOut();
+  }
+
+  @override
+  Future<void> completePendingSignOut() {
+    return remote.completePendingSignOut();
+  }
 }

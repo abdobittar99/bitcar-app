@@ -1,6 +1,11 @@
+import 'dart:async';
+
+import 'package:car_shop/core/cache/cache_helper.dart';
+import 'package:car_shop/core/cache/cache_keys.dart';
 import 'package:car_shop/core/enums/error_type.dart';
 import 'package:car_shop/core/errors/mapper/error_mapper.dart';
 import 'package:car_shop/core/errors/exception.dart';
+import 'package:car_shop/core/session/session_gate.dart';
 import 'package:car_shop/models/user_model.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -8,8 +13,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 class HomeRemoteDataSource {
   final FirebaseAuth auth;
   final FirebaseFirestore firestore;
+  final SessionGate sessionGate;
 
-  HomeRemoteDataSource(this.auth, this.firestore);
+  HomeRemoteDataSource(this.auth, this.firestore, this.sessionGate);
 
   Future<AppUserModel> getCurrentUser() async {
     try {
@@ -22,7 +28,9 @@ class HomeRemoteDataSource {
         );
       }
 
-      final doc = await firestore.collection('users').doc(user.uid).get();
+      final doc = await sessionGate.run(
+        () => firestore.collection('users').doc(user.uid).get(),
+      );
 
       if (!doc.exists) {
         throw AppException(
@@ -36,11 +44,129 @@ class HomeRemoteDataSource {
     }
   }
 
-  Future<void> logOut() async {
+  // True when writes are still waiting for the server. It only times out with unsynced writes or
+  // a slow network, so it can warn when not needed but never misses a change (research D18).
+  Future<bool> hasPendingWrites() async {
+    _throwIfSignOutIncomplete();
     try {
-      await auth.signOut();
+      await firestore.waitForPendingWrites().timeout(const Duration(seconds: 3));
+      return false;
+    } on TimeoutException {
+      return true;
     } catch (e) {
       throw ErrorMapper.map(e);
+    }
+  }
+
+  // First step of a sign-out, before the "Signing out…" view: once the marker is saved, a kill at
+  // any later step is finished by the next start. If it cannot be saved the sign-out does not
+  // start, so nothing else runs and no marker may remain (research D18 step 3).
+  Future<void> prepareSignOut() async {
+    _throwIfSignOutIncomplete();
+    bool saved;
+    try {
+      saved = await CacheHelper.saveData(
+        key: CacheKeys.firestoreWipePending,
+        value: true,
+      );
+    } on Exception {
+      saved = false;
+    }
+    if (saved) return;
+    await _removeMarker();
+    throw AppException(
+      message: 'Could not start signing out. Please try again.',
+      type: ErrorType.cache,
+    );
+  }
+
+  // Sign-out sequence of research D18 step 3, always after prepareSignOut. These methods manage
+  // the gate, so they do not go through sessionGate.run. The marker is removed last: if the app is
+  // killed before that, the next start wipes again, which is harmless, and finishes the sign-out.
+  Future<void> logOut() async {
+    _throwIfSignOutIncomplete();
+    await sessionGate.closeForSignOut();
+    final wiped = await _wipe();
+    if (!await _signOut()) {
+      sessionGate.markSignOutIncomplete();
+      throw AppException(
+        message: SessionGate.signOutIncompleteMessage,
+        type: ErrorType.auth,
+      );
+    }
+    if (!wiped) {
+      sessionGate.markWipePending();
+      throw AppException(
+        message: SessionGate.wipePendingMessage,
+        type: ErrorType.cache,
+      );
+    }
+    await _finish();
+  }
+
+  // Startup, before runApp: finishes a sign-out that did not complete. It never throws; a failure
+  // leaves the gate blocking Firestore (research D18 step 4).
+  Future<void> completePendingSignOut() async {
+    if (CacheHelper.getData(key: CacheKeys.firestoreWipePending) != true) return;
+    final wiped = await _wipe();
+    if (!await _signOut()) {
+      sessionGate.markSignOutIncomplete();
+      return;
+    }
+    if (!wiped) {
+      sessionGate.markWipePending();
+      return;
+    }
+    await _finish();
+  }
+
+  // The gate's retryWipe, after a failed wipe. It only wipes and never signs out: by then the
+  // sign-out is finished, and another user may be signed in (research D18 step 4).
+  Future<void> retryPendingWipe() async {
+    if (await _wipe()) await _finish();
+  }
+
+  void _throwIfSignOutIncomplete() {
+    if (sessionGate.isSignOutIncomplete) {
+      throw AppException(
+        message: SessionGate.signOutIncompleteMessage,
+        type: ErrorType.auth,
+      );
+    }
+  }
+
+  // A failure is not lost: the callers report it through the gate state and the marker.
+  Future<bool> _wipe() async {
+    try {
+      await firestore.terminate();
+      await firestore.clearPersistence();
+      return true;
+    } on Exception {
+      return false;
+    }
+  }
+
+  Future<bool> _signOut() async {
+    try {
+      await auth.signOut();
+      return true;
+    } on Exception {
+      return false;
+    }
+  }
+
+  // The wipe and sign-out are done, so a marker that could not be removed must not block the app:
+  // the next start only repeats a harmless wipe and sign-out.
+  Future<void> _finish() async {
+    await _removeMarker();
+    sessionGate.open();
+  }
+
+  Future<void> _removeMarker() async {
+    try {
+      await CacheHelper.removeData(key: CacheKeys.firestoreWipePending);
+    } on Exception {
+      // A marker that stays is handled by the next start.
     }
   }
 }

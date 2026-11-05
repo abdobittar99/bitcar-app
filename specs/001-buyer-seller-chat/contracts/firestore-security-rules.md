@@ -33,7 +33,7 @@ Every row below is covered by an automated test in `firestore_tests/` (see "Auto
 | `create` | `signedIn()`; `participants` is the sorted pair, has 2 distinct uids, contains `uid()`; `cid == cidOf(participants[0], participants[1])`; `buyerId == uid()`; `sellerId` is the other uid; `createdAt == request.time`; the first message `messages/{mid}` is created in the **same** transaction (`existsAfter`) |
 | `update` (send) | participant; only `lastMessage`, `lastMessageAt`, `unreadCount` change; `lastMessageAt == request.time`; `unreadCount[other]` increases by exactly 1; own count unchanged; `lastMessage.senderId == uid()`; the referenced message exists after the write |
 | `update` (mark read) | participant; only `unreadCount` and `lastReadAt` change; `unreadCount[uid()] == 0`; `lastReadAt[uid()] == request.time`; other participant's entries unchanged |
-| `update` (delete message) | participant; only `lastMessage` and/or `unreadCount` change; `unreadCount[other]` decreases by at most 1 and stays ≥ 0; if `lastMessage` changes it only sets `deleted: true`, `text: ""` for a message whose `senderId == uid()` |
+| `update` (delete message, research D19) | participant; `lastDeletedMessageId` changes and is a string `mid`, and besides it only `lastMessage` and `unreadCount` may change. `get(messages/mid)` shows it exists, `senderId == uid()` and `deleted == false`; `getAfter(messages/mid)` shows `deleted == true`. Own unread unchanged. `unreadCount[other]` must equal **exactly**: old − 1 if the message is newer than the other user's `lastReadAt` and `clearedAt` and old > 0, otherwise old. If `resource.lastMessage.id == mid`, `lastMessage` must equal `{id: mid, text: "", senderId: uid(), deleted: true}`; otherwise it must stay unchanged |
 | `update` (delete conversation) | participant; only `clearedAt` and `unreadCount` change; `clearedAt[uid()] == request.time`; `unreadCount[uid()] == 0`; other participant's entries unchanged |
 | `delete` | never (one-sided deletion is an update) |
 | Immutable on every update | `participants`, `buyerId`, `sellerId`, `createdAt` |
@@ -51,7 +51,7 @@ user who has a public profile, and can later replace only **its own** placeholde
 |---|---|
 | `get`, `list` | `isParticipant(cid)` |
 | `create` | `isParticipant(cid)` **or** the conversation is being created in the same transaction with `uid()` as participant (`getAfter`); `senderId == uid()`; `validText(text)`; `deleted == false`; `createdAt == request.time`; keys exactly `senderId, text, createdAt, deleted`; **rate limit** (below) |
-| `update` (delete for everyone) | `resource.data.senderId == uid()`; `resource.data.deleted == false`; only `deleted` and `text` change; `deleted == true`; `text == ""` |
+| `update` (delete for everyone) | `resource.data.senderId == uid()`; `resource.data.deleted == false`; only `deleted` and `text` change; `deleted == true`; `text == ""`; `getAfter(conversations/cid).lastDeletedMessageId == mid`, so a message cannot be deleted without the conversation update in the same commit (research D19) |
 | `delete` | never |
 
 ### `chatRateLimits/{uid}`
@@ -124,7 +124,7 @@ register writes `users/{uid}` right after the account is created, so it is alrea
 | R3 | Participant | create message with `senderId` of the other user | denied |
 | R4 | Participant | edit `text` of own non-deleted message to new text | denied (no editing) |
 | R5 | Participant | delete other user's message | denied |
-| R6 | Participant | set other user's `unreadCount` to 0 or change their `lastReadAt` / `clearedAt` | denied |
+| R6 | Participant | set other user's `unreadCount` to any value, lower it by one with no message deleted, or change their `lastReadAt` / `clearedAt` | denied. Lowering it by one with no message deleted was allowed until the rules of research D19 were deployed on 2026-11-04 (ruleset `f5ae6bcf-a13c-4bc3-b047-4e565cda37d7`) |
 | R7 | Signed-in user | create conversation for two other users | denied |
 | R8 | Participant | 21st message within 60 s | denied |
 | R9 | Signed-out client | any chat path | denied |
@@ -139,6 +139,15 @@ register writes `users/{uid}` right after the account is created, so it is alrea
 | R18 | Owner | write own `publicProfiles.displayName` different from own `users.fullName` | denied |
 | R19 | Signed-in user | list `publicProfiles` (any query) | denied |
 | R20 | Signed-out client | get a `publicProfiles` doc | denied |
+| R21 | Participant | name a real message in `lastDeletedMessageId`, with or without lowering unread, without deleting it | denied |
+| R22 | Participant | name an already deleted message, delete it again, or lower unread with the same id already stored | denied (no replay) |
+| R23 | Participant | name the other user's message, a missing message, a message of another conversation, a non-string or a path | denied |
+| R24 | Participant | delete a message with no conversation update, naming a different message, or two messages in one commit | denied |
+| R25 | Participant | delete a message the recipient has seen (`lastReadAt` or `clearedAt`) and lower unread | denied |
+| R26 | Participant | delete a message the recipient has not seen and leave unread unchanged, or lower it by 2, raise it, make it negative, or change own unread | denied |
+| R27 | Participant | delete the latest message and keep its preview text, or delete an older one and rewrite the preview | denied |
+| R28 | Participant | change any other field in the delete write, or set `lastDeletedMessageId` in a send or mark-read write | denied |
+| R29 | Non-participant (any role, incl. admin) | run the whole delete write | denied |
 
 Allowed-path tests are required as well, so a too-strict rule fails just like a too-loose one: create conversation +
 first message (with profile names; with the placeholder when the other user has no profile), send, mark read, delete
@@ -158,7 +167,7 @@ is never allowed, so a cursor always points to an existing position.
 |---|---|
 | Location | `firestore_tests/` at repo root (own `package.json`, isolated from Flutter and `functions/`) |
 | Dev dependencies | `@firebase/rules-unit-testing`, `firebase` (its required peer). Runner: built-in `node:test` |
-| Files | `config.test.js` (rules file wiring, below), `chat.rules.test.js` (R1–R15 + chat allowed paths), `public_profiles.rules.test.js` (R16–R20 + allowed paths), `existing.rules.test.js` (E1–E13, S1, S2), `helpers.js` (test env, seed data with rules disabled, auth contexts for A, S, O, admin M, unauthenticated) |
+| Files | `config.test.js` (rules file wiring, below), `chat.rules.test.js` (R1–R15 + chat allowed paths + participant-only access by every role), `chat_delete.rules.test.js` (R6 unread count, R21–R29, allowed deletes, stale writes and the retry of research D19), `public_profiles.rules.test.js` (R16–R20 + allowed paths), `existing.rules.test.js` (E1–E13, S1, S2), `helpers.js` (test env, seed data with rules disabled, auth contexts for A, S, O, admin M, unauthenticated) |
 | Rules under test | **The project's real `firestore.rules`**: `helpers.js` reads `path.resolve(__dirname, '..', 'firestore.rules')` and passes its content to `initializeTestEnvironment({ projectId: 'demo-bitcar', firestore: { rules } })`. No copy of the rules exists in `firestore_tests/` |
 | Wiring check (`config.test.js`) | parses `firebase.json` and asserts `firestore.rules === "firestore.rules"` and `firestore.indexes === "firestore.indexes.json"`, that both files exist, and that the path loaded by `helpers.js` is the same file. Fails if anyone repoints or copies the rules |
 | Project | `demo-bitcar` (Emulator-only demo project: no network calls, cannot touch `carshop-b79bc`) |

@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 
-Future<bool?> confirmDelete(BuildContext context) {
+Future<bool?> confirmDelete(
+  BuildContext context, {
+  String title = 'Delete car',
+  String message = 'Are you sure you want to delete this car?',
+}) {
   return showDialog<bool>(
     context: context,
     builder: (_) => AlertDialog(
-      title: const Text('Delete car'),
-      content: const Text('Are you sure you want to delete this car?'),
+      title: Text(title),
+      content: Text(message),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),

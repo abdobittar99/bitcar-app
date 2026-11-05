@@ -1,0 +1,13 @@
+{
+  "name": "bitcar-firestore-rules-tests",
+  "private": true,
+  "type": "commonjs",
+  "description": "Security Rules tests for the root firestore.rules, run on the Firestore emulator (project demo-bitcar)",
+  "scripts": {
+    "test": "node --test --test-concurrency=1"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "5.0.2",
+    "firebase": "12.19.0"
+  }
+}

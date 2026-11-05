@@ -168,14 +168,24 @@ class ProfileScreen extends StatelessWidget {
                     context.read<FavoriteBloc>().add(ClearFavorite());
                   }
                 },
-                child: AppButton(
-                  text: "Logout",
-                  icon: Icons.logout,
-                  iconColor: Colors.red,
-                  textStyle: const TextStyle(color: Colors.red),
-                  isLoading: state.isLoading,
-                  onPressed: () {
-                    context.read<HomeBloc>().add(LogoutPressed());
+                // Shows progress during the check for unsynced changes (up to 3 s). AppButton
+                // ignores presses while loading, and HomeBloc ignores repeats too.
+                child: BlocBuilder<HomeBloc, HomeState>(
+                  buildWhen: (prev, curr) =>
+                      prev.isCheckingPendingWrites !=
+                      curr.isCheckingPendingWrites,
+                  builder: (context, homeState) {
+                    return AppButton(
+                      text: "Logout",
+                      icon: Icons.logout,
+                      iconColor: Colors.red,
+                      textStyle: const TextStyle(color: Colors.red),
+                      isLoading:
+                          state.isLoading || homeState.isCheckingPendingWrites,
+                      onPressed: () {
+                        context.read<HomeBloc>().add(LogoutPressed());
+                      },
+                    );
                   },
                 ),
               ),

@@ -3,4 +3,7 @@ import 'package:car_shop/entities/app_user.dart';
 abstract class HomeRepository {
   Future<UserEntity> getCurrentUser();
   Future<void> logOut();
+  Future<bool> hasPendingWrites();
+  Future<void> prepareSignOut();
+  Future<void> completePendingSignOut();
 }

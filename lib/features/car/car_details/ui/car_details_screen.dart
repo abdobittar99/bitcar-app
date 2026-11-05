@@ -3,6 +3,9 @@ import 'package:car_shop/features/car/car_details/bloc/car_details_bloc.dart';
 import 'package:car_shop/features/car/car_details/bloc/car_details_event.dart';
 import 'package:car_shop/features/car/car_details/bloc/car_details_state.dart';
 import 'package:car_shop/features/car/car_details/ui/details_section.dart';
+import 'package:car_shop/features/chat/chat_room/bloc/chat_bloc.dart';
+import 'package:car_shop/features/chat/chat_room/bloc/chat_event.dart';
+import 'package:car_shop/features/chat/chat_room/ui/chat_screen.dart';
 import 'package:car_shop/features/favorite/bloc/favorite_bloc.dart';
 import 'package:car_shop/features/favorite/bloc/favorite_event.dart';
 import 'package:car_shop/features/favorite/bloc/favorite_state.dart';
@@ -155,6 +158,27 @@ class CarDetailsScreen extends StatelessWidget {
                   ),
 
                   const SizedBox(height: 16),
+                  if (state.currentUserId != null &&
+                      car.sellerId.trim().isNotEmpty &&
+                      car.sellerId != state.currentUserId) ...[
+                    AppButton(
+                      text: 'Chat with Seller',
+                      icon: Icons.chat_bubble_outline,
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => BlocProvider(
+                              create: (_) =>
+                                  sl<ChatBloc>()..add(ChatStarted.fromCar(car)),
+                              child: const ChatScreen(),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                  ],
                   SizedBox(
                     width: double.infinity,
                     child: AppButton(

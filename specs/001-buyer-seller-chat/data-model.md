@@ -32,6 +32,7 @@ Not created in this version (future push phase, see [contracts/future-push-notif
 | `lastMessageAt` | timestamp | each send | `serverTimestamp()`; list order |
 | `lastMessage` | map | each send / delete | `{ id, text, senderId, deleted }`; preview. On delete of the latest message: `deleted: true`, `text: ""` |
 | `unreadCount` | map\<uid, int\> | send (+1 recipient), mark-read (own → 0), delete (−1 recipient if unread), clear (own → 0) | Badge + red dot (and the "N new messages" count for a future push phase) |
+| `lastDeletedMessageId` | string, optional | each delete for everyone | Id of the message deleted in the same commit. Security Rules need it to find that message (research D19). Absent until the first delete; older conversations need no migration. Not read by the app: no model or entity field |
 | `lastReadAt` | map\<uid, timestamp\> | mark-read (own) | Read receipts: message read when `createdAt <= lastReadAt[recipient]` |
 | `clearedAt` | map\<uid, timestamp\> | delete conversation (own) | One-sided deletion (FR-027a). Absent = never cleared |
 
@@ -141,6 +142,7 @@ isFromCache})`, and never imports `features/chat/domain/`.
 | `publicProfiles/{uid}`: owner-written, only `displayName` (1–100 chars), equal to own `users.fullName`; `get` for signed-in users, `list` denied | rules |
 | ≤ 20 messages / 60 s / user (FR-014a) | rules via `chatRateLimits` (authoritative) + client pre-check |
 | Only sender deletes, once; text emptied (FR-027) | rules |
+| A delete is one commit of message + conversation; each message lowers unread at most once, only if the recipient had not seen it (research D19) | rules, through `lastDeletedMessageId` |
 | `participants`, `buyerId`, `sellerId`, `createdAt` immutable | rules |
 | A user may change only their own `lastReadAt`, `clearedAt`, and reset only their own `unreadCount` | rules |
 
@@ -205,20 +207,25 @@ Batch size is a constant `messagesPageSize = 20` (spec FR-037/FR-038).
 ```text
  open ── LogoutConfirmed / no pending writes ──► closing   (streams cancelled, new operations refused,
                                                           in-flight drained ≤ 5 s)
- closing ── terminate + clearPersistence OK ──► open       (marker removed, auth.signOut())
- closing ── wipe fails ──► wipePending                     (marker kept, auth.signOut() still runs)
- wipePending ── any Firestore operation ──► retry wipe ── OK ──► open
-                                                    └── fails ──► refused (ErrorType.cache)
+ closing ── wipe OK and auth.signOut() OK ──► open         (marker removed after signOut)
+ closing ── wipe fails, auth.signOut() OK ──► wipePending  (marker kept; a wipe retry can open the gate)
+ closing ── auth.signOut() fails ──► wipePending           (marker kept; retry refused, no Firestore until restart)
+ wipePending ── any Firestore operation ──► retry wipe only, never signOut ── OK ──► open
+                                                    └── fails or refused ──► operation refused (ErrorType.cache)
  app start with marker set ──► wipe + signOut before runApp ──► open | wipePending
 ```
 
 Local device key (SharedPreferences via `CacheHelper`): `CacheKeys.firestoreWipePending = 'firestore_wipe_pending'`
-(bool). Set before `terminate()`, removed after a successful `clearPersistence()`.
+(bool). Set before the "Signing out…" view and before the gate closes; if it cannot be saved, the sign-out is cancelled. On sign-out and at startup it is removed only after both the wipe and `signOut()`
+succeed; the wipe retry removes it after its wipe succeeds, since the sign-out already finished.
 
 ### Unread count (per user, per conversation)
 
 ```text
  +1 when the other participant sends (not when user is inside the chat: mark-read follows immediately)
- −1 when the other participant deletes a message the user has not read
+ −1 when the other participant deletes a message the user has not seen (never below 0)
   0 when the user opens the chat (mark-read) or deletes the conversation
 ```
+
+"Not seen" means `createdAt` is later than both the user's `lastReadAt` and `clearedAt`: the unread count only counts
+messages after a clear, so an older message must not lower it (research D19).

@@ -67,6 +67,12 @@ All findings below were checked against the current code in this repository, not
   already exists; otherwise writes the message, `lastMessage`, `lastMessageAt`, `unreadCount[recipient] + 1`, and the
   rate-limit doc.
 - **Rationale**: Retry with the same id never duplicates (FR-014). Transactions need a connection, matching FR-014b.
+- **Concurrent sends (found in B7 device testing, 2026-11-04)**: same-window rate-limit updates use
+  `FieldValue.increment(1)`. An absolute `count + 1` from a stale read is refused by the rules with
+  `permission-denied`, which the client does not retry (reproduced on the emulator: 1 of 5 concurrent sends
+  succeeded; with `increment`, 5 of 5). The bloc also sends one message at a time per screen, which keeps the send
+  order and avoids competing transactions. Trade-off: on a very slow connection queued messages wait their turn
+  and stay `sending` longer.
 - **States**: `sending`/`failed` are local bloc state; `sent` = present in the server-confirmed stream; `read` = derived
   from `lastReadAt`.
 
@@ -164,6 +170,30 @@ All findings below were checked against the current code in this repository, not
   - **JDK (owner decision 2026-10-31)**: JDK 21 is installed **next to** JDK 17. Only the emulator command uses it, by
     setting `JAVA_HOME` and `PATH` for that terminal session (see quickstart). Flutter and Gradle keep their current JDK
     configuration; nothing global is changed.
+  - **Pinned versions (B1, 2026-11-02)**: `@firebase/rules-unit-testing` 5.0.2 + `firebase` 12.19.0 (peer `^12`,
+    Node ≥ 20). 6.0.0 was not used because it requires Node ≥ 24.12 (local Node is 20.20).
+  - **Known `npm audit` findings, accepted for the local test environment (owner decision 2026-11-02, option A)**:
+
+    | Advisory | CVSS | Affected / patched | Scope |
+    |---|---|---|---|
+    | GHSA-m9gg-hp2v-232j (CVE-2026-101916) | 7.4 | `@grpc/grpc-js` < 1.13.6 and 1.14.0–1.14.4 / fixed in 1.13.6, 1.14.5 | **gRPC servers** only: `getAuthContext` when server credentials use `requireClientCertificate: false` |
+    | GHSA-f596-whhp-79r4 (CVE-2026-101915) | 3.7 | same ranges / same fixes | **gRPC servers** only: a crashing method handler's error message is sent to the client |
+
+    - Installed: one copy, `@grpc/grpc-js@1.9.16`, pulled in by `firebase@12.19.0` → `@firebase/firestore@4.17.2`
+      (`"~1.9.0"`), also via `@firebase/firestore-compat`. `npm audit` reports "5 high" because it counts the same two
+      advisories on every dependent (`@grpc/grpc-js`, `@firebase/firestore`, `@firebase/firestore-compat`, `firebase`,
+      `@firebase/rules-unit-testing`).
+    - Why it does not apply: these are **development dependencies** in `firestore_tests/` only, never part of the
+      Flutter app or any deployment. The Firestore SDK uses `@grpc/grpc-js` as a **client** to reach the local Firestore
+      emulator (`127.0.0.1:8080`, project `demo-bitcar`); nothing in this project runs a gRPC server with it.
+    - Why it is not fixed now: the patched versions (≥ 1.13.6) are **outside the range the Firestore SDK declares**
+      (`~1.9.0`, still the same in the latest `@firebase/firestore` 4.19.0 / `firebase` 13.1.0), and 1.9.16 is the last
+      1.9.x release. `npm audit fix --force` would downgrade to `firebase` 9.14.0 and is not used; `npm overrides` are
+      not used either (an untested SDK/grpc combination for no security gain here). `package.json` and
+      `package-lock.json` are unchanged.
+    - **Re-evaluate** whenever the Firebase JS SDK (`firebase`, `@firebase/rules-unit-testing`) or Node is updated:
+      run `npm ls @grpc/grpc-js` and `npm audit` inside `firestore_tests/`, and check whether the SDK's declared range
+      now includes a patched `@grpc/grpc-js`.
 
 ### D14. Participant names via `publicProfiles` (approved 2026-10-31, rev. 3)
 
@@ -176,15 +206,23 @@ All findings below were checked against the current code in this repository, not
     private profile.
   - **Sync points** (use case `SyncPublicProfile`):
     1. App opened after sign-in: `ConversationsBloc` on `ConversationsStarted` (from `HomeLayout`), using the name from
-       `GetCurrentUser`. Creates the doc for users who registered before this feature.
+       `GetCurrentUser`. Creates the doc for users who registered before this feature. Runs in parallel with the
+       list subscription and never delays it; connection errors are not shown and the next app open repeats it; a
+       read from the cache writes nothing, so no write is queued offline (owner decision before B8, FR-014b).
+       If `GetCurrentUser` fails the name is unknown, so this sync does not start, even if the list subscribed with
+       the uid from the auth session. It runs after the next successful `GetCurrentUser`: on `ConversationsRetried`
+       (the Retry button of the list error state) or on the next app open. Until then the user's public name stays
+       as it was (missing, or the previous value), and sending still works with the placeholder rule below.
     2. Name changed: `ProfileBloc._onUpdated`, after `UpdateUserProfile` succeeds and the name differs. If the sync
        fails, the profile save still counts as successful, the error is shown through `AppErrorCubit`, and sync 1 repairs
        it on the next app start.
 - **Placeholder rule (owner's proposal, adopted)**: when creating a conversation, for each participant:
   - if `publicProfiles/{uid}` **exists**, the stored name **must equal** its `displayName`;
   - if it **does not exist**, the **only** accepted value is the fixed placeholder `"BitCar user"`.
-  - Later, a participant may replace **only their own** placeholder, **only with their own** profile name (done when they
-    open the conversation via `GetChatTarget`). Real names already stored never change (snapshot).
+  - Later, a participant may replace **only their own** placeholder, **only with their own** profile name. `GetChatTarget`
+    itself does not write: when it reports a placeholder from server data, `ChatBloc` runs `FillOwnPlaceholderName`
+    without waiting, so opening is never delayed or blocked, and the stored or placeholder name is shown meanwhile
+    (owner decision before B8). Real names already stored never change (snapshot).
   - Result: a client can never write an invented name, cannot use the placeholder for someone who has a profile, and
     cannot touch the other participant's entry. Rules contract cases R11–R15.
 - **Why the sender's own name is also checked**: the creator's own entry follows the same rule, so it cannot be faked
@@ -340,41 +378,166 @@ unchanged) and wipe it on sign-out with `terminate()` + `clearPersistence()`; wa
    - `Future<void> closeForSignOut()`: state → `closing` (new operations rejected), cancels every registered stream
      (the bloc subscriptions receive *done*, not an error), then waits for in-flight operations (max 5 s; after that
      they are abandoned and fail harmlessly once the instance is terminated).
-   - `Future<void> Function()? retryWipe`: set at DI time to the home datasource's wipe method.
-   - `open()` after a successful wipe.
+   - **Abandoned operations and the in-flight count (reviewed before B11, no change needed)**: `_inFlight` is never
+     reset. Each operation adds 1 once and its `finally` subtracts 1 once, whenever it finishes, even in a later
+     session. So the count can be too high but never too low, and a sign-out never skips waiting for a live operation.
+     The only cost: an operation that never finishes makes each later sign-out in that app run wait the full 5 s. A
+     reset is rejected, because a late `finally` would then lower the new session's count. No generation counter is
+     added, since the current behavior is already safe. Tests in T074 keep this true.
+   - `Future<void> Function()? retryWipe`: set at DI time to `HomeRemoteDataSource.retryPendingWipe`, which only wipes
+     and **never signs out** (step 4).
+   - `open()` after a successful wipe and sign-out.
 2. **Pending-write check before sign-out** (`HasPendingWrites` use case → `HomeRemoteDataSource.hasPendingWrites()`):
    `waitForPendingWrites().timeout(3 s)`; completes → no unsynced writes; times out → unsynced writes exist. A slow
    network can produce a false "unsynced" warning, never a missed one (safe side).
-3. **Sign-out sequence** (`HomeRemoteDataSource.logOut()`, after the user confirmed if needed):
-   1. `sessionGate.closeForSignOut()` (streams cancelled, no new operations, in-flight drained)
-   2. `CacheHelper` marker `firestore_wipe_pending = true`
-   3. `firestore.terminate()`
-   4. `firestore.clearPersistence()`
-   5. marker removed
-   6. `auth.signOut()` (last, so listeners never see a signed-out state → no `permission-denied`)
-   7. `sessionGate.open()`
-   - If step 3 or 4 fails: the marker stays, the gate goes to `wipePending`, and `auth.signOut()` still runs (the
-     session ends). While `wipePending`, every Firestore operation first retries the wipe through `retryWipe` and is
-     refused with `AppException(type: ErrorType.cache, message: 'Previous session data could not be cleared. Please
-     try again.')` if it fails again. Sign-in calls `AuthRemoteDatasource`, which goes through the gate too, so a new
-     user cannot reach Firestore before the wipe succeeds.
-4. **Startup completion** (`CompletePendingSignOut` use case, called in `main.dart` after `init()` and **before
-   `runApp`**, so before any Firestore access): if the marker is set → `terminate()` (harmless on an unstarted
-   instance) → `clearPersistence()` → remove marker → `auth.signOut()` (completes a sign-out that was interrupted,
-   e.g. app killed) → gate `open`; on failure the marker stays, the gate starts in `wipePending` **and
-   `auth.signOut()` still runs**, so the interrupted sign-out is always completed (same rule as step 3).
+3. **Sign-out sequence** (after the user confirmed if needed; order approved by the owner before B12):
+   1. `HomeRemoteDataSource.prepareSignOut()`: save marker `firestore_wipe_pending = true` and wait for it
+   2. `HomeBloc` emits `isSigningOut: true`, so the "Signing out…" view appears, and calls `LogOut`, which runs
+      `HomeRemoteDataSource.logOut()`:
+   3. `sessionGate.closeForSignOut()` (streams cancelled, no new operations, in-flight drained)
+   4. `firestore.terminate()`
+   5. `firestore.clearPersistence()`
+   6. `auth.signOut()` (after the listeners stopped, so they never see a signed-out state → no `permission-denied`)
+   7. marker removed
+   8. `sessionGate.open()`
+
+   **The marker comes first (changed before B12)**: closing the gate can take up to 5 s with an unfinished write. With
+   the marker saved after it, an app killed while "Signing out…" was on screen had no marker, so the user reopened
+   signed in and the confirmed sign-out was lost (Q25). Now any kill after the view appears finishes the sign-out at
+   the next start, before `runApp`. Writes still pending are then dropped, which is what the user confirmed in the
+   warning (FR-052); without a warning there were none.
+
+   **If the marker cannot be saved** (the save throws, or returns `false`), the sign-out is cancelled completely:
+   `prepareSignOut` throws `AppException(type: ErrorType.cache, message: 'Could not start signing out. Please try
+   again.')`, `HomeBloc` shows it and never emits `isSigningOut`, `LogOut` is not called, the gate stays open, nothing
+   is wiped, and the user stays signed in. Without a saved marker, a kill could not be recovered, so no later step may
+   run.
+
+   If the app is killed after the marker is saved and before the view appears, the next start also finishes the
+   sign-out; the user had already chosen to leave.
+
+   The marker is removed **after** `signOut()` (changed before B11): if the app is killed between the two, the next
+   start wipes again, which is harmless, and finishes the sign-out. Removing it first could leave the user signed in
+   with no record that the sign-out was unfinished (FR-053).
+
+   | Result | Marker | Gate | Error thrown |
+   |---|---|---|---|
+   | Wipe OK, `signOut` OK | removed | `open` | none |
+   | Wipe fails, `signOut` OK | kept | `wipePending`; each Firestore operation retries the wipe through `retryWipe` and is refused if it fails again | `ErrorType.cache`: "Previous session data could not be cleared. Please try again." |
+   | `signOut` fails, wipe OK or not (owner decision before B11) | kept | `wipePending` through `markSignOutIncomplete()`: **no wipe retry**, so no Firestore operation runs for the rest of this app run, even if a wipe could succeed | `ErrorType.auth`: "Could not finish signing out. Please restart the app to complete it." |
+
+   In the last case the user is still signed in, so opening the gate would let them use Firestore after asking to
+   leave. A second Logout is **not allowed** in this app run: `prepareSignOut`, `logOut` and `hasPendingWrites` throw the same error
+   without touching Firestore, the gate or the marker, and the next start finishes through step 4.
+
+   The gate holds the reason, so refused operations show the message of that reason: the two errors above, with the
+   same types. Sign-in itself does not touch Firestore, and every later read goes through the gate, so a new user
+   cannot reach Firestore before the wipe succeeds.
+4. **Startup completion and wipe retry are two different operations (changed before B11)**:
+
+   | | `completePendingSignOut` | `retryPendingWipe` |
+   |---|---|---|
+   | Called by | `CompletePendingSignOut` use case, in `main.dart` after `init()` and **before `runApp`**, before any Firestore access | `SessionGate.retryWipe`, from a Firestore operation while `wipePending` |
+   | Steps | If the marker is set: `terminate()` (harmless on an unstarted instance) → `clearPersistence()` → `auth.signOut()` → remove marker → `open` | `terminate()` → `clearPersistence()` → remove marker → `open` |
+   | Calls `auth.signOut()` | **Yes**: it finishes a sign-out that was interrupted, e.g. app killed | **Never** |
+   | On failure | Marker kept, `wipePending`, no throw at startup. A wipe failure still runs `auth.signOut()`; a `signOut` failure calls `markSignOutIncomplete()` | Marker kept, stays `wipePending`, no throw: the gate refuses the operation |
+   | After a failed `signOut` | Runs: a new app run starts without that state | Not called: the gate refuses without retrying |
+
+   They must stay separate. If the retry signed out, a wipe that succeeds after user O signed in would sign O out at
+   their first Firestore read. A consequence of the safe side: if the marker is still set and O restarts the app, the
+   startup step signs O out once before wiping.
 5. **No `permission-denied` after sign-out**: listeners are cancelled in step 3.1, before `signOut()`. As a second
-   line, the chat datasource's stream error mapping closes the stream when an **explicit check**
-   (`!sessionGate.isOpen || auth.currentUser == null`) says the session has ended; every other error is mapped with
-   `ErrorMapper.map` and shown (no bare `catch`, constitution III). Blocs treat stream *done* as no-op.
-6. **UI during sign-out**: `HomeBloc` emits `isSigningOut: true`; `HomeLayout` replaces its body with a blocking
-   progress view, so no new user action starts Firestore work. `HomeBloc` checks `isClosed` before emitting after
+   line, every chat stream goes through `ChatRemoteDataSource._watchGuarded` (which wraps `sessionGate.watch`), and
+   its error handling decides with an **explicit check** (no bare `catch`, constitution III), approved 2026-11-03:
+
+   | Situation when a stream error arrives | Result |
+   |---|---|
+   | Gate state `closing` (sign-out in progress) | stream closed quietly (*done*), nothing shown |
+   | No signed-in user (`auth.currentUser == null`) | stream closed quietly (*done*), nothing shown |
+   | Gate state `wipePending` **and** a signed-in user | error shown: `AppException(type: ErrorType.cache, message: 'Previous session data could not be cleared. Please try again.')`; no data is loaded |
+   | Any other error | mapped with `ErrorMapper.map` and shown |
+
+   The check is `sessionGate.state == SessionGateState.closing || auth.currentUser == null`. It is intentionally not
+   `!sessionGate.isOpen`: that would also close streams quietly in `wipePending`, so a user who signs in after a
+   failed wipe would see an empty screen without explanation. Blocs treat stream *done* as no-op.
+   The helper became private (`_watchGuarded`) at T034, once `watchLatestMessages` used it; T057 uses it the same
+   way from inside the datasource.
+6. **UI during sign-out**: `HomeBloc` emits `isSigningOut: true` only after the marker is saved; `HomeLogoutGate` (in `HomeLayout`) covers the app
+   with a blocking progress view, so no new user action starts Firestore work. It covers rather than replaces the
+   tabs, so they keep their state if the sign-out fails and `profile_screen.dart` stays mounted for `isSuccess`. `HomeBloc` checks `isClosed` before emitting after
    the sign-out (the auth stream disposes `HomeLayout`).
 7. **Warning dialog (FR-052)**: `LogoutPressed` → `HasPendingWrites`; if true → state `showUnsyncedWarning` →
    `BlocListener` shows "Some changes haven't been saved to the server yet and will be lost. Log out anyway?" with
    **Cancel** (`LogoutCancelled`, stays signed in) and **Log out** (`LogoutConfirmed`). If false → sign-out directly.
+   The check can take up to 3 s, so the Logout button shows progress (`isCheckingPendingWrites`) and repeated presses
+   are ignored.
+8. **Accepted**: a background operation refused during sign-out (a queued message, for example) may show "Signing out,
+   please wait" behind the blocking view. It is harmless, so it is left as it is and watched in Q23.
 
 **Alternatives considered**: B (persistence off) rejected by the owner (breaks offline reading after restart,
 FR-014b, and changes existing screens); wiping inside `logOut()` without a gate (listeners and in-flight calls can
 restart the instance between `terminate` and `clearPersistence`); wiping after `signOut()` (listeners first receive
 `permission-denied`, and the login screen is already usable).
+
+### D19. Proof of deletion for the unread count (decision R6, owner approved 2026-11-04)
+
+**Finding (T066 review)**: rule `isDeleteMessageUpdate` lets a participant lower the other user's `unreadCount` by one
+with no message deleted, and repeat it down to 0. Reproduced on the emulator. Only the conversation's two participants
+can do it, so FR-032 and SC-008 hold, but contract case R6 did not: its test changed `lastReadAt` in the same write and
+was refused for that other reason.
+
+**Decision**: every delete for everyone writes `lastDeletedMessageId: mid` on the conversation in the same commit as the
+message, and the rules on both documents check each other.
+
+**Why the field is needed**: rules cannot see the other writes of a commit or search a collection; `get()` and
+`getAfter()` need a full document path, and a conversation update otherwise carries no message id when the deleted
+message is not the latest. `lastMessage.id` cannot serve, since it must keep naming the latest message. The only way
+to avoid a new field is to drop the unread adjustment, which the owner rejected.
+
+**How `get()` and `getAfter()` work here**: in one transaction or batch, `get()` returns the state before the whole
+commit and `getAfter()` the state as if all its writes succeeded, and the commit is all-or-nothing. A refused rule on
+either document therefore refuses both writes.
+
+**Conditions**:
+
+| Requirement | Enforced by |
+|---|---|
+| No unread change without a real delete in this conversation | Conversation rule: `lastDeletedMessageId` must change; the path is built from `cid`; `get` shows `deleted == false`, `getAfter` shows `deleted == true` |
+| Caller may delete that message | Both rules: `senderId == uid()` |
+| Each message counts once | `deleted == false` before the commit; a deleted message can never pass again |
+| Unread falls only for an unseen message | Exact value: old − 1 if `createdAt` is later than the other user's `lastReadAt` and `clearedAt` and old > 0, otherwise old |
+| The field and the count cannot change separately | Every other update branch excludes `lastDeletedMessageId`, and this branch requires it to change |
+| Message and conversation change together | Message rule: `getAfter(conversation).lastDeletedMessageId == mid` |
+| Preview cannot keep deleted text | Latest message: `lastMessage` must equal the deleted form; older message: must stay unchanged |
+
+**Preventing reuse or tampering of the id**: it proves nothing by itself. Keeping the stored value fails the "must
+change" condition; naming a message that is already deleted, belongs to someone else, is missing, or is in another
+conversation fails its conditions; deleting a second message in the commit fails the message rule, which requires its
+own id. The stale value left on the conversation grants nothing, since that message is already deleted.
+
+**Why `clearedAt` counts as seen**: a clear sets the user's unread to 0 without moving `lastReadAt`. Without this check,
+deleting a message from before the clear would lower the count of newer messages the user has not seen.
+
+**Stale writes**: the rules compare with the current data, and Firestore answers `permission-denied` before its
+contention check, so the transaction does not retry by itself (research D4). If the recipient reads the chat or a new
+message arrives between the read and the commit, the delete is refused. `deleteMessage` retries **once** with fresh
+reads; a real denial simply fails twice.
+
+**Verification (2026-11-04, emulator, experimental rules copy outside the project)**: 32 attacks refused, 7 legitimate
+deletes allowed including the full transaction, and other conversation writes still pass next to the new field. Of the
+existing rules tests, the only failure is the delete test using the old write shape. The retry was then tested as a
+JavaScript copy of the T069 steps (`chat_delete.rules.test.js`); the Dart code belongs to T069. The project's rules
+suite then passed 165/165 on the emulator.
+
+**Status: closed in production on 2026-11-04**. Deployed with the owner's explicit approval from commit `e94300a`
+(ruleset `f5ae6bcf-a13c-4bc3-b047-4e565cda37d7`); the released rules read back identical to `firestore.rules`. The
+owner then passed the device check and Q15 with accounts O and M (admin) against the deployed rules.
+
+**Limits accepted**: a sender may still lower the count by deleting their own unseen message, which is the feature. The
+exact-value check means a client bug is refused rather than silently miscounting.
+
+**Spark**: rules only; no Cloud Functions, no index, no migration (the field is optional).
+
+**Alternatives**: drop the adjustment (the count could include a deleted message; rejected); only document the
+behavior (the gap stays; rejected); a marker document per deletion (more writes and another collection, no extra
+guarantee).
