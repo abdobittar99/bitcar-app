@@ -2,11 +2,13 @@
 
 BitCar is a Flutter mobile application for browsing, listing, searching, and comparing new and used cars. I built this project independently from scratch to apply Flutter development practices and software architecture concepts in a practical application.
 
-The application follows Clean Architecture and uses BLoC/Cubit for state management, with Firebase Authentication and Cloud Firestore for authentication and data management. It provides role-based functionality for buyers, sellers, and administrators.
+The application follows Clean Architecture and uses BLoC/Cubit for state management, with Firebase Authentication and Cloud Firestore for authentication, data management, and real-time buyer–seller communication. It provides role-based functionality for buyers, sellers, and administrators.
 
 ---
 
 ## Features
+
+### Car Marketplace
 
 * **Authentication:** User registration and login using Firebase Authentication.
 * **Car Listings:** Browse new and used cars.
@@ -17,6 +19,21 @@ The application follows Clean Architecture and uses BLoC/Cubit for state managem
 * **Role-Based Functionality:** Separate functionality for Admin, Seller, and Buyer roles.
 * **Banner Advertisement Management:** Allow administrators to manage banner advertisements.
 * **Pagination and Lazy Loading:** Load car listings incrementally.
+
+### Buyer–Seller Messaging
+
+* **Real-Time Messaging:** Allow buyers and sellers to communicate directly through the application.
+* **Unique Conversations:** Maintain one conversation per buyer–seller pair, allowing buyers to discuss different cars from the same seller within a single conversation.
+* **Conversation List:** Display conversations with last-message previews and unread message counts.
+* **Read Status:** Update message read statuses in real time.
+* **Message Pagination:** Load older messages incrementally.
+* **Connection Handling:** Handle connection states and support retry operations after interruptions.
+* **Secure Conversation Management:** Support controlled deletion of messages and conversations.
+* **Access Control:** Protect conversations and messages using Firestore Security Rules to prevent unauthorized access.
+* **Session Isolation:** Prevent previous users' chat data from leaking across logout and account-switching operations.
+
+### General
+
 * **Responsive UI:** Reusable interface components designed for different screen sizes.
 * **Error Handling:** Provide user-friendly feedback for application errors.
 
@@ -35,6 +52,10 @@ The application follows Clean Architecture and uses BLoC/Cubit for state managem
 | Compare                                    | My Cars                                    |
 | ------------------------------------------ | ------------------------------------------ |
 | ![Compare Screen](screenshots/compare.jpg) | ![My Cars Screen](screenshots/my_cars.jpg) |
+
+| Conversations                                          | Chat Room                                      |
+| ------------------------------------------------------ | ---------------------------------------------- |
+| ![Conversations Screen](screenshots/conversations.jpg) | ![Chat Room Screen](screenshots/chat_room.jpg) |
 
 | Profile                                    |
 | ------------------------------------------ |
@@ -58,6 +79,7 @@ The application follows Clean Architecture and uses BLoC/Cubit for state managem
 
 * Firebase Authentication
 * Cloud Firestore
+* Firestore Security Rules
 * SharedPreferences
 
 ### Architecture and Design Patterns
@@ -87,14 +109,14 @@ Presentation
           │ uses
           ▼
 Domain
-  ├── Entities
+  ├── Entities / Domain Models
   ├── Use Cases
   └── Repository Contracts
           ▲
           │ implemented by
           │
 Data
-  ├── Models
+  ├── Data Models
   ├── Data Sources
   └── Repository Implementations
           │
@@ -105,6 +127,10 @@ Firebase
 ```
 
 The Domain layer defines application logic and repository contracts. The Data layer provides repository implementations and handles data access, while the Presentation layer uses BLoC/Cubit to manage state and coordinate the user interface with application logic.
+
+Within the car and chat modules, the Data and Domain layers are shared across their related features, while each feature maintains its own BLoC and UI components.
+
+The chat module uses Firebase Authentication to identify conversation participants and Cloud Firestore for real-time message synchronization, conversation management, and read-status updates. Firestore Security Rules enforce access control over conversations and messages.
 
 ---
 
@@ -179,7 +205,23 @@ lib/
 │   │       ├── bloc/
 │   │       └── ui/
 │   │
-│   └── ... other application features
+│   ├── chat/
+│   │   ├── chat_room/
+│   │   │   ├── bloc/
+│   │   │   └── ui/
+│   │   ├── conversations/
+│   │   │   ├── bloc/
+│   │   │   └── ui/
+│   │   ├── data/
+│   │   │   ├── datasource/
+│   │   │   └── repositories/
+│   │   └── domain/
+│   │       ├── model/
+│   │       ├── repositories/
+│   │       └── usecase/
+│   │
+│   └── compare/
+│
 ├── models/
 ├── shared/
 │   ├── components/
@@ -188,10 +230,9 @@ lib/
 └── main.dart
 ```
 
-The project is organized into feature modules, shared components, and common application services.
+The project is organized into feature modules, shared components, and common application functionality.
 
-Within the car module, the `data` and `domain` layers are shared across the car-related features, while each feature maintains its own BLoC and UI components.
-
+Within the car and chat modules, the Data and Domain layers are shared across related features. Each feature maintains its own BLoC and UI components, reducing unnecessary duplication while keeping presentation logic organized.
 
 ---
 
@@ -199,7 +240,7 @@ Within the car module, the `data` and `domain` layers are shared across the car-
 
 Vehicle images currently use local assets.
 
-The image-source structure is prepared to support switching to Firebase Storage in the future. However, Firebase Storage integration is not currently active, and the application does not currently upload vehicle images to Firebase Storage.
+The image-source structure is prepared to support switching to Firebase Storage in the future. The `firebase_storage` package is included in the project dependencies, but Firebase Storage integration is not currently active, and vehicle images are not uploaded to Firebase Storage.
 
 ---
 
