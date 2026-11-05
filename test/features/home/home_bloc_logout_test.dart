@@ -16,6 +16,7 @@ import 'package:car_shop/features/home/domain/repositories/home_repository.dart'
 import 'package:car_shop/features/home/domain/usecase/get_current_user.dart';
 import 'package:car_shop/features/home/domain/usecase/has_pending_writes.dart';
 import 'package:car_shop/features/home/domain/usecase/logout.dart';
+import 'package:car_shop/features/home/domain/usecase/prepare_sign_out.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -25,11 +26,25 @@ import 'fakes/fake_firebase.dart';
 class FakeHomeRepository implements HomeRepository {
   bool pending = false;
   int checks = 0;
+  int prepares = 0;
   int logOuts = 0;
   AppException? checkError;
+  AppException? prepareError;
   AppException? logOutError;
   Completer<void>? checkGate;
+  Completer<void>? prepareGate;
   Completer<void>? logOutGate;
+  // Whether the marker step had finished when LogOut was called.
+  bool? preparedBeforeLogOut;
+  bool _prepared = false;
+
+  @override
+  Future<void> prepareSignOut() async {
+    prepares++;
+    await prepareGate?.future;
+    if (prepareError != null) throw prepareError!;
+    _prepared = true;
+  }
 
   @override
   Future<UserEntity> getCurrentUser() async => UserEntity(
@@ -51,6 +66,7 @@ class FakeHomeRepository implements HomeRepository {
   @override
   Future<void> logOut() async {
     logOuts++;
+    preparedBeforeLogOut = _prepared;
     await logOutGate?.future;
     if (logOutError != null) throw logOutError!;
   }
@@ -72,6 +88,7 @@ class RecordingErrorCubit extends AppErrorCubit {
 HomeBloc buildBloc(HomeRepository repo, AppErrorCubit errors) => HomeBloc(
   loggout: LogOut(repo),
   hasPendingWrites: HasPendingWrites(repo),
+  prepareSignOut: PrepareSignOut(repo),
   getCurrentUser: GetCurrentUser(repo),
   appErrorCubit: errors,
 );
@@ -100,6 +117,151 @@ void main() {
 
   AppException failure(String message, ErrorType type) =>
       AppException(message: message, type: type);
+
+  group('marker first', () {
+    const startError = 'Could not start signing out. Please try again.';
+
+    Future<List<HomeState>> statesDuring(Future<void> Function() action) async {
+      final states = <HomeState>[];
+      final sub = bloc.stream.listen(states.add);
+      await action();
+      await settle();
+      await sub.cancel();
+      return states;
+    }
+
+    test('no warning path: isSigningOut and LogOut wait for the marker', () async {
+      repo.prepareGate = Completer<void>();
+      bloc.add(LogoutPressed());
+      await settle();
+
+      expect(repo.prepares, 1);
+      expect(bloc.state.isSigningOut, isFalse);
+      expect(repo.logOuts, 0);
+      expect(bloc.state.isCheckingPendingWrites, isTrue, reason: 'the button keeps its progress');
+
+      repo.logOutGate = Completer<void>();
+      repo.prepareGate!.complete();
+      await settle();
+
+      expect(bloc.state.isSigningOut, isTrue);
+      expect(bloc.state.isCheckingPendingWrites, isFalse);
+      expect(repo.logOuts, 1);
+      expect(repo.preparedBeforeLogOut, isTrue);
+
+      repo.logOutGate!.complete();
+      await settle();
+    });
+
+    test('warning path: Log out waits for the marker too', () async {
+      repo.pending = true;
+      bloc.add(LogoutPressed());
+      await settle();
+      expect(repo.prepares, 0, reason: 'nothing is saved before the user chooses');
+
+      repo.prepareGate = Completer<void>();
+      bloc.add(LogoutConfirmed());
+      await settle();
+      expect(repo.prepares, 1);
+      expect(bloc.state.isSigningOut, isFalse);
+      expect(repo.logOuts, 0);
+
+      repo.prepareGate!.complete();
+      await settle();
+      expect(repo.logOuts, 1);
+      expect(repo.preparedBeforeLogOut, isTrue);
+    });
+
+    test('Cancel saves nothing', () async {
+      repo.pending = true;
+      bloc.add(LogoutPressed());
+      await settle();
+      bloc.add(LogoutCancelled());
+      await settle();
+
+      expect(repo.prepares, 0);
+    });
+
+    test('a failed save: error shown, isSigningOut never emitted, no LogOut', () async {
+      repo.prepareError = failure(startError, ErrorType.cache);
+
+      final states = await statesDuring(() async => bloc.add(LogoutPressed()));
+
+      expect(errors.shown, [startError]);
+      expect(states.any((s) => s.isSigningOut), isFalse);
+      expect(states.any((s) => s.isSuccess), isFalse);
+      expect(repo.logOuts, 0);
+      expect(bloc.state.isCheckingPendingWrites, isFalse);
+    });
+
+    test('a failed save from the warning: back in the app, and Logout works again', () async {
+      repo.pending = true;
+      bloc.add(LogoutPressed());
+      await settle();
+      repo.prepareError = failure(startError, ErrorType.cache);
+
+      final states = await statesDuring(() async => bloc.add(LogoutConfirmed()));
+
+      expect(states.any((s) => s.isSigningOut), isFalse);
+      expect(bloc.state.showUnsyncedWarning, isFalse);
+      expect(repo.logOuts, 0);
+
+      repo.prepareError = null;
+      repo.pending = false;
+      bloc.add(LogoutPressed());
+      await settle();
+      expect(repo.prepares, 2);
+      expect(repo.logOuts, 1);
+    });
+
+    test('repeated presses during the save make one save', () async {
+      repo.prepareGate = Completer<void>();
+      bloc.add(LogoutPressed());
+      await settle();
+
+      bloc.add(LogoutPressed());
+      bloc.add(LogoutConfirmed());
+      await settle();
+      expect(repo.prepares, 1);
+      expect(repo.checks, 1);
+
+      repo.prepareGate!.complete();
+      await settle();
+      expect(repo.logOuts, 1);
+    });
+
+    test('a double confirm during the save makes one save', () async {
+      repo.pending = true;
+      bloc.add(LogoutPressed());
+      await settle();
+
+      repo.prepareGate = Completer<void>();
+      bloc.add(LogoutConfirmed());
+      bloc.add(LogoutConfirmed());
+      await settle();
+      expect(repo.prepares, 1);
+
+      repo.prepareGate!.complete();
+      await settle();
+      expect(repo.logOuts, 1);
+    });
+
+    test('closed during the save: no LogOut and no emit', () async {
+      repo.prepareGate = Completer<void>();
+      bloc.add(LogoutPressed());
+      await settle();
+
+      final states = <HomeState>[];
+      final sub = bloc.stream.listen(states.add);
+      await bloc.close();
+      repo.prepareGate!.complete();
+      await settle();
+
+      expect(repo.logOuts, 0);
+      expect(states, isEmpty);
+      await sub.cancel();
+    });
+  });
 
   group('LogoutPressed', () {
     test('no pending writes: logs out directly, with no warning', () async {
@@ -509,6 +671,43 @@ void main() {
         ]);
         expect(realBloc.state.isSuccess, isTrue);
       });
+    });
+
+    for (final (name, breakIt) in [
+      ('returns false', (FakePrefs p) => p.saveResult = false),
+      ('throws', (FakePrefs p) => p.saveThrows = true),
+    ]) {
+      test('the marker save $name: the sign-out never starts, and the user stays in', () async {
+        final prefs = FakePrefs();
+        breakIt(prefs);
+        CacheHelper.useForTesting(prefs);
+
+        realBloc.add(LogoutPressed());
+        await settle();
+
+        expect(log.calls, ['waitForPendingWrites']);
+        expect(realErrors.shown, ['Could not start signing out. Please try again.']);
+        expect(markerSet(), isFalse);
+        expect(gate.isOpen, isTrue);
+        expect(realBloc.state.isSigningOut, isFalse);
+        expect(realBloc.state.isSuccess, isFalse);
+        expect(await gate.run(() async => 'still works'), 'still works');
+      });
+    }
+
+    test('the marker is saved before the view and before the gate closes', () async {
+      final seen = <bool>[];
+      final sub = realBloc.stream.listen((s) {
+        if (s.isSigningOut) seen.add(markerSet());
+      });
+
+      realBloc.add(LogoutPressed());
+      await settle();
+      await sub.cancel();
+
+      expect(seen, isNotEmpty);
+      expect(seen, everyElement(isTrue));
+      expect(log.markerAtClose, isTrue);
     });
 
     group('the two failures differ', () {

@@ -13,6 +13,7 @@ import 'package:car_shop/features/home/domain/repositories/home_repository.dart'
 import 'package:car_shop/features/home/domain/usecase/get_current_user.dart';
 import 'package:car_shop/features/home/domain/usecase/has_pending_writes.dart';
 import 'package:car_shop/features/home/domain/usecase/logout.dart';
+import 'package:car_shop/features/home/domain/usecase/prepare_sign_out.dart';
 import 'package:car_shop/features/home/ui/home_logout_gate.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -24,8 +25,16 @@ const warningText =
 class FakeHomeRepository implements HomeRepository {
   bool pending = false;
   int logOuts = 0;
+  AppException? prepareError;
   AppException? logOutError;
+  Completer<void>? prepareGate;
   Completer<void>? logOutGate;
+
+  @override
+  Future<void> prepareSignOut() async {
+    await prepareGate?.future;
+    if (prepareError != null) throw prepareError!;
+  }
 
   @override
   Future<UserEntity> getCurrentUser() async => UserEntity(
@@ -65,6 +74,7 @@ void main() {
     bloc = HomeBloc(
       loggout: LogOut(repo),
       hasPendingWrites: HasPendingWrites(repo),
+      prepareSignOut: PrepareSignOut(repo),
       getCurrentUser: GetCurrentUser(repo),
       appErrorCubit: errors,
     );
@@ -183,6 +193,36 @@ void main() {
 
     expect(clears, 1);
     expect(find.text('Signing out…'), findsOneWidget, reason: 'stays up until HomeLayout is disposed');
+  });
+
+  testWidgets('no blocking view while the marker is being saved', (tester) async {
+    repo.prepareGate = Completer<void>();
+    await show(tester);
+    await pressLogout(tester);
+
+    expect(find.text('Signing out…'), findsNothing);
+    expect(repo.logOuts, 0);
+
+    repo.logOutGate = Completer<void>();
+    repo.prepareGate!.complete();
+    await settle(tester);
+
+    expect(find.text('Signing out…'), findsOneWidget);
+    repo.logOutGate!.complete();
+    await settle(tester);
+  });
+
+  testWidgets('a failed marker save: no blocking view, the error shows, nothing cleared', (tester) async {
+    const message = 'Could not start signing out. Please try again.';
+    repo.prepareError = AppException(message: message, type: ErrorType.cache);
+    await show(tester);
+    await pressLogout(tester);
+
+    expect(find.text('Signing out…'), findsNothing);
+    expect(find.text('Home content'), findsOneWidget);
+    expect(errors.state, message);
+    expect(repo.logOuts, 0);
+    expect(clears, 0);
   });
 
   testWidgets('the blocking view blocks the app underneath', (tester) async {

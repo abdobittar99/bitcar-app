@@ -4,5 +4,6 @@ abstract class HomeRepository {
   Future<UserEntity> getCurrentUser();
   Future<void> logOut();
   Future<bool> hasPendingWrites();
+  Future<void> prepareSignOut();
   Future<void> completePendingSignOut();
 }

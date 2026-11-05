@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class CacheHelper {
@@ -6,6 +7,9 @@ class CacheHelper {
   static Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
   }
+
+  @visibleForTesting
+  static void useForTesting(SharedPreferences prefs) => _prefs = prefs;
 
   static Future<bool> saveData({
     required String key,

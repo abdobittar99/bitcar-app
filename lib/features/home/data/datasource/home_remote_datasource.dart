@@ -58,13 +58,35 @@ class HomeRemoteDataSource {
     }
   }
 
-  // Sign-out sequence of research D18 step 3. These methods manage the gate, so they do not go
-  // through sessionGate.run. The marker is removed last: if the app is killed before that, the
-  // next start wipes again, which is harmless, and finishes the sign-out.
+  // First step of a sign-out, before the "Signing out…" view: once the marker is saved, a kill at
+  // any later step is finished by the next start. If it cannot be saved the sign-out does not
+  // start, so nothing else runs and no marker may remain (research D18 step 3).
+  Future<void> prepareSignOut() async {
+    _throwIfSignOutIncomplete();
+    bool saved;
+    try {
+      saved = await CacheHelper.saveData(
+        key: CacheKeys.firestoreWipePending,
+        value: true,
+      );
+    } on Exception {
+      saved = false;
+    }
+    if (saved) return;
+    await _removeMarker();
+    throw AppException(
+      message: 'Could not start signing out. Please try again.',
+      type: ErrorType.cache,
+    );
+  }
+
+  // Sign-out sequence of research D18 step 3, always after prepareSignOut. These methods manage
+  // the gate, so they do not go through sessionGate.run. The marker is removed last: if the app is
+  // killed before that, the next start wipes again, which is harmless, and finishes the sign-out.
   Future<void> logOut() async {
     _throwIfSignOutIncomplete();
     await sessionGate.closeForSignOut();
-    final wiped = await _wipe(saveMarker: true);
+    final wiped = await _wipe();
     if (!await _signOut()) {
       sessionGate.markSignOutIncomplete();
       throw AppException(
@@ -114,14 +136,8 @@ class HomeRemoteDataSource {
   }
 
   // A failure is not lost: the callers report it through the gate state and the marker.
-  Future<bool> _wipe({bool saveMarker = false}) async {
+  Future<bool> _wipe() async {
     try {
-      if (saveMarker) {
-        await CacheHelper.saveData(
-          key: CacheKeys.firestoreWipePending,
-          value: true,
-        );
-      }
       await firestore.terminate();
       await firestore.clearPersistence();
       return true;
@@ -142,11 +158,15 @@ class HomeRemoteDataSource {
   // The wipe and sign-out are done, so a marker that could not be removed must not block the app:
   // the next start only repeats a harmless wipe and sign-out.
   Future<void> _finish() async {
+    await _removeMarker();
+    sessionGate.open();
+  }
+
+  Future<void> _removeMarker() async {
     try {
       await CacheHelper.removeData(key: CacheKeys.firestoreWipePending);
     } on Exception {
-      // Reported by the marker itself, which the next start handles.
+      // A marker that stays is handled by the next start.
     }
-    sessionGate.open();
   }
 }

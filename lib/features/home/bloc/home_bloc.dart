@@ -5,16 +5,20 @@ import 'package:car_shop/features/home/bloc/home_state.dart';
 import 'package:car_shop/features/home/domain/usecase/get_current_user.dart';
 import 'package:car_shop/features/home/domain/usecase/has_pending_writes.dart';
 import 'package:car_shop/features/home/domain/usecase/logout.dart';
+import 'package:car_shop/features/home/domain/usecase/prepare_sign_out.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 class HomeBloc extends Bloc<HomeEvent, HomeState> {
   final GetCurrentUser getCurrentUser;
   final LogOut loggout;
   final HasPendingWrites hasPendingWrites;
+  final PrepareSignOut prepareSignOut;
   final AppErrorCubit appErrorCubit;
+  bool _isPreparingSignOut = false;
   HomeBloc({
     required this.loggout,
     required this.hasPendingWrites,
+    required this.prepareSignOut,
     required this.getCurrentUser,
     required this.appErrorCubit,
   }) : super(const HomeState()) {
@@ -44,7 +48,8 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
   ) async {
     if (state.isCheckingPendingWrites ||
         state.showUnsyncedWarning ||
-        state.isSigningOut) {
+        state.isSigningOut ||
+        _isPreparingSignOut) {
       return;
     }
     emit(state.copyWith(isCheckingPendingWrites: true));
@@ -69,7 +74,6 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
       );
       return;
     }
-    emit(state.copyWith(isCheckingPendingWrites: false));
     await _signOut(emit);
   }
 
@@ -77,7 +81,9 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
     LogoutConfirmed event,
     Emitter<HomeState> emit,
   ) async {
-    if (!state.showUnsyncedWarning || state.isSigningOut) return;
+    if (!state.showUnsyncedWarning || state.isSigningOut || _isPreparingSignOut) {
+      return;
+    }
     await _signOut(emit);
   }
 
@@ -89,10 +95,32 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
   // Sign-out disposes HomeLayout and this bloc through the auth stream, so it may already be closed
   // here. An error is still shown, since the error cubit outlives this bloc. isSuccess is true only
   // after a complete sign-out; profile_screen.dart clears the other blocs on it.
+  //
+  // The marker is saved first, so "Signing out…" never shows without it (research D18 step 3). If
+  // it cannot be saved the sign-out does not start, and the user stays signed in.
   Future<void> _signOut(Emitter<HomeState> emit) async {
+    _isPreparingSignOut = true;
+    try {
+      await prepareSignOut();
+    } on AppException catch (e) {
+      appErrorCubit.showError(e.message);
+      if (isClosed) return;
+      emit(
+        state.copyWith(
+          isCheckingPendingWrites: false,
+          showUnsyncedWarning: false,
+        ),
+      );
+      return;
+    } finally {
+      _isPreparingSignOut = false;
+    }
+    if (isClosed) return;
+
     emit(
       state.copyWith(
         isSuccess: false,
+        isCheckingPendingWrites: false,
         showUnsyncedWarning: false,
         isSigningOut: true,
       ),

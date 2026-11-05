@@ -23,6 +23,11 @@ class HomeRepositoryImpl implements HomeRepository {
   }
 
   @override
+  Future<void> prepareSignOut() {
+    return remote.prepareSignOut();
+  }
+
+  @override
   Future<void> completePendingSignOut() {
     return remote.completePendingSignOut();
   }

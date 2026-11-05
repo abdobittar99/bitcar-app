@@ -56,6 +56,7 @@ import 'package:car_shop/features/home/domain/usecase/complete_pending_sign_out.
 import 'package:car_shop/features/home/domain/usecase/get_current_user.dart';
 import 'package:car_shop/features/home/domain/usecase/has_pending_writes.dart';
 import 'package:car_shop/features/home/domain/usecase/logout.dart';
+import 'package:car_shop/features/home/domain/usecase/prepare_sign_out.dart';
 import 'package:car_shop/features/favorite/bloc/favorite_bloc.dart';
 import 'package:car_shop/features/favorite/data/datasource/favorite_remote_datasource.dart';
 import 'package:car_shop/features/favorite/data/repositories/favorite_repository_impl.dart';
@@ -97,6 +98,7 @@ Future<void> init() async {
   sl.registerLazySingleton(() => GetCurrentUser(sl()));
   sl.registerLazySingleton(() => LogOut(sl()));
   sl.registerLazySingleton(() => HasPendingWrites(sl()));
+  sl.registerLazySingleton(() => PrepareSignOut(sl()));
   sl.registerLazySingleton(() => CompletePendingSignOut(sl()));
   // The gate's retry only wipes and never signs out (research D18 step 4).
   sl<SessionGate>().retryWipe = () => sl<HomeRemoteDataSource>().retryPendingWipe();
@@ -105,6 +107,7 @@ Future<void> init() async {
     () => HomeBloc(
       loggout: sl(),
       hasPendingWrites: sl(),
+      prepareSignOut: sl(),
       getCurrentUser: sl(),
       appErrorCubit: sl(),
     ),

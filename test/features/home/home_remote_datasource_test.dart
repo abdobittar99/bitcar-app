@@ -27,6 +27,12 @@ void main() {
   Future<void> setMarker() =>
       CacheHelper.saveData(key: CacheKeys.firestoreWipePending, value: true);
 
+  // What HomeBloc does: the marker first, then the sign-out.
+  Future<void> signOutFlow() async {
+    await dataSource.prepareSignOut();
+    await dataSource.logOut();
+  }
+
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     await CacheHelper.init();
@@ -53,9 +59,182 @@ void main() {
     expect(ran, isFalse);
   }
 
+  group('prepareSignOut', () {
+    const startMessage = 'Could not start signing out. Please try again.';
+
+    Future<void> expectNothingElseRan() async {
+      expect(log.calls, isEmpty);
+      expect(gate.isOpen, isTrue);
+      expect(await gate.run(() async => 'still works'), 'still works');
+    }
+
+    test('saves the marker and touches nothing else', () async {
+      await dataSource.prepareSignOut();
+
+      expect(markerSet(), isTrue);
+      expect(log.calls, isEmpty);
+      expect(gate.isOpen, isTrue);
+    });
+
+    test('the save returns false: error, nothing else runs, no marker remains', () async {
+      final prefs = FakePrefs()..saveResult = false;
+      CacheHelper.useForTesting(prefs);
+
+      await expectLater(
+        dataSource.prepareSignOut(),
+        throwsApp(ErrorType.cache, startMessage),
+      );
+
+      expect(markerSet(), isFalse);
+      await expectNothingElseRan();
+    });
+
+    test('the save returns false but the value reached the disk: it is removed', () async {
+      final prefs = FakePrefs()
+        ..saveResult = false
+        ..storeAnyway = true;
+      CacheHelper.useForTesting(prefs);
+
+      await expectLater(
+        dataSource.prepareSignOut(),
+        throwsApp(ErrorType.cache, startMessage),
+      );
+
+      expect(prefs.removes, 1);
+      expect(markerSet(), isFalse);
+      await expectNothingElseRan();
+    });
+
+    test('the save throws: error, nothing else runs, no marker remains', () async {
+      final prefs = FakePrefs()..saveThrows = true;
+      CacheHelper.useForTesting(prefs);
+
+      await expectLater(
+        dataSource.prepareSignOut(),
+        throwsApp(ErrorType.cache, startMessage),
+      );
+
+      expect(markerSet(), isFalse);
+      await expectNothingElseRan();
+    });
+
+    test('the removal fails too: the same error, and the app keeps working', () async {
+      final prefs = FakePrefs()
+        ..saveResult = false
+        ..storeAnyway = true
+        ..removeThrows = true;
+      CacheHelper.useForTesting(prefs);
+
+      await expectLater(
+        dataSource.prepareSignOut(),
+        throwsApp(ErrorType.cache, startMessage),
+      );
+
+      await expectNothingElseRan();
+    });
+
+    test('logOut does not save the marker itself', () async {
+      final prefs = FakePrefs();
+      CacheHelper.useForTesting(prefs);
+
+      await dataSource.logOut();
+
+      expect(prefs.saves, 0);
+    });
+
+    test('the marker is already saved when the gate closes', () async {
+      await signOutFlow();
+
+      expect(log.markerAtClose, isTrue);
+      expect(log.calls.first, 'closeForSignOut');
+    });
+  });
+
+  // A kill at each step from the saved marker on: the next start finishes the sign-out, before
+  // runApp. The kill is simulated with a step that never finishes, then a new gate and datasource.
+  group('app killed during the sign-out', () {
+    late FakePrefs prefs;
+
+    setUp(() {
+      prefs = FakePrefs();
+      CacheHelper.useForTesting(prefs);
+    });
+
+    // What main.dart does on the next start, with a new gate and working Firebase.
+    Future<(CallLog, RecordingGate)> nextStart() async {
+      final next = CallLog();
+      final newGate = RecordingGate(next);
+      await HomeRemoteDataSource(
+        FakeAuth(next),
+        FakeFirestore(next),
+        newGate,
+      ).completePendingSignOut();
+      return (next, newGate);
+    }
+
+    Future<void> expectFinishedAtNextStart() async {
+      expect(markerSet(), isTrue, reason: 'the marker must survive the kill');
+
+      final (next, newGate) = await nextStart();
+
+      expect(next.calls, ['terminate', 'clearPersistence', 'signOut', 'open']);
+      expect(markerSet(), isFalse);
+      expect(newGate.isOpen, isTrue);
+    }
+
+    test('after saving the marker, before the gate closes', () async {
+      await dataSource.prepareSignOut();
+
+      await expectFinishedAtNextStart();
+    });
+
+    for (final step in ['closeForSignOut', 'terminate', 'clearPersistence', 'signOut']) {
+      test('during $step', () async {
+        log.hangOn = step;
+        await dataSource.prepareSignOut();
+        unawaited(dataSource.logOut());
+        await pumpEventQueue();
+        expect(log.calls.last, step);
+
+        await expectFinishedAtNextStart();
+      });
+    }
+
+    test('after signOut, before the marker is removed', () async {
+      prefs.hangOnRemove = true;
+      await dataSource.prepareSignOut();
+      unawaited(dataSource.logOut());
+      await pumpEventQueue();
+      expect(log.calls.last, 'signOut');
+      expect(prefs.removes, 1);
+      prefs.hangOnRemove = false;
+
+      await expectFinishedAtNextStart();
+    });
+
+    test('after the marker is removed: the sign-out is complete and nothing runs', () async {
+      await signOutFlow();
+      expect(markerSet(), isFalse);
+
+      final (next, newGate) = await nextStart();
+
+      expect(next.calls, isEmpty);
+      expect(newGate.isOpen, isTrue);
+    });
+
+    test('with nothing saved, a failed prepare leaves the next start with nothing to do', () async {
+      prefs.saveResult = false;
+      await expectLater(dataSource.prepareSignOut(), throwsA(isA<AppException>()));
+
+      final (next, _) = await nextStart();
+
+      expect(next.calls, isEmpty);
+    });
+  });
+
   group('logOut', () {
     test('success: the exact order, with the marker removed only after signOut', () async {
-      await dataSource.logOut();
+      await signOutFlow();
 
       expect(log.calls, [
         'closeForSignOut',
@@ -74,7 +253,7 @@ void main() {
       firestore = _MarkerCheckingFirestore(log, (v) => markerAtTerminate = v);
       dataSource = HomeRemoteDataSource(auth, firestore, gate);
 
-      await dataSource.logOut();
+      await signOutFlow();
 
       expect(markerAtTerminate, isTrue);
     });
@@ -89,7 +268,7 @@ void main() {
       });
       dataSource = HomeRemoteDataSource(auth, firestore, gate);
 
-      await dataSource.logOut();
+      await signOutFlow();
       await pumpEventQueue();
 
       expect(refused, isA<AppException>());
@@ -103,7 +282,7 @@ void main() {
         breakIt(firestore);
 
         await expectLater(
-          dataSource.logOut(),
+          signOutFlow(),
           throwsApp(ErrorType.cache, wipeMessage),
         );
 
@@ -117,7 +296,7 @@ void main() {
 
     test('a failed wipe keeps blocking with the wipe message while the retry fails', () async {
       firestore.failClear = true;
-      await expectLater(dataSource.logOut(), throwsA(isA<AppException>()));
+      await expectLater(signOutFlow(), throwsA(isA<AppException>()));
 
       await expectFirestoreRefused(wipeMessage, ErrorType.cache);
       expect(markerSet(), isTrue);
@@ -125,7 +304,7 @@ void main() {
 
     test('a failed wipe retried with success opens the gate, without another signOut', () async {
       firestore.failClear = true;
-      await expectLater(dataSource.logOut(), throwsA(isA<AppException>()));
+      await expectLater(signOutFlow(), throwsA(isA<AppException>()));
       final signOuts = log.calls.where((c) => c == 'signOut').length;
 
       firestore.failClear = false;
@@ -144,7 +323,7 @@ void main() {
           auth.failSignOut = true;
           firestore.failClear = wipeFails;
           await expectLater(
-            dataSource.logOut(),
+            signOutFlow(),
             throwsApp(ErrorType.auth, signOutMessage),
           );
         });
@@ -180,6 +359,22 @@ void main() {
           expect(gate.state, SessionGateState.wipePending);
         });
 
+        test('prepareSignOut throws the same error without touching the marker', () async {
+          final prefs = FakePrefs()..values[CacheKeys.firestoreWipePending] = true;
+          CacheHelper.useForTesting(prefs);
+          log.calls.clear();
+
+          await expectLater(
+            dataSource.prepareSignOut(),
+            throwsApp(ErrorType.auth, signOutMessage),
+          );
+
+          expect(prefs.saves, 0);
+          expect(prefs.removes, 0);
+          expect(markerSet(), isTrue);
+          expect(log.calls, isEmpty);
+        });
+
         test('hasPendingWrites does not touch Firestore and throws the same error', () async {
           log.calls.clear();
 
@@ -195,7 +390,7 @@ void main() {
 
     test('the next app start finishes it', () async {
       auth.failSignOut = true;
-      await expectLater(dataSource.logOut(), throwsA(isA<AppException>()));
+      await expectLater(signOutFlow(), throwsA(isA<AppException>()));
 
       // A new app run: new gate, same device marker, and signOut works now.
       log.calls.clear();

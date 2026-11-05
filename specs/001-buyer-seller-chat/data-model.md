@@ -216,7 +216,7 @@ Batch size is a constant `messagesPageSize = 20` (spec FR-037/FR-038).
 ```
 
 Local device key (SharedPreferences via `CacheHelper`): `CacheKeys.firestoreWipePending = 'firestore_wipe_pending'`
-(bool). Set before `terminate()`. On sign-out and at startup it is removed only after both the wipe and `signOut()`
+(bool). Set before the "Signing out…" view and before the gate closes; if it cannot be saved, the sign-out is cancelled. On sign-out and at startup it is removed only after both the wipe and `signOut()`
 succeed; the wipe retry removes it after its wipe succeeds, since the sign-out already finished.
 
 ### Unread count (per user, per conversation)

@@ -390,14 +390,31 @@ unchanged) and wipe it on sign-out with `terminate()` + `clearPersistence()`; wa
 2. **Pending-write check before sign-out** (`HasPendingWrites` use case → `HomeRemoteDataSource.hasPendingWrites()`):
    `waitForPendingWrites().timeout(3 s)`; completes → no unsynced writes; times out → unsynced writes exist. A slow
    network can produce a false "unsynced" warning, never a missed one (safe side).
-3. **Sign-out sequence** (`HomeRemoteDataSource.logOut()`, after the user confirmed if needed):
-   1. `sessionGate.closeForSignOut()` (streams cancelled, no new operations, in-flight drained)
-   2. `CacheHelper` marker `firestore_wipe_pending = true`
-   3. `firestore.terminate()`
-   4. `firestore.clearPersistence()`
-   5. `auth.signOut()` (after the listeners stopped, so they never see a signed-out state → no `permission-denied`)
-   6. marker removed
-   7. `sessionGate.open()`
+3. **Sign-out sequence** (after the user confirmed if needed; order approved by the owner before B12):
+   1. `HomeRemoteDataSource.prepareSignOut()`: save marker `firestore_wipe_pending = true` and wait for it
+   2. `HomeBloc` emits `isSigningOut: true`, so the "Signing out…" view appears, and calls `LogOut`, which runs
+      `HomeRemoteDataSource.logOut()`:
+   3. `sessionGate.closeForSignOut()` (streams cancelled, no new operations, in-flight drained)
+   4. `firestore.terminate()`
+   5. `firestore.clearPersistence()`
+   6. `auth.signOut()` (after the listeners stopped, so they never see a signed-out state → no `permission-denied`)
+   7. marker removed
+   8. `sessionGate.open()`
+
+   **The marker comes first (changed before B12)**: closing the gate can take up to 5 s with an unfinished write. With
+   the marker saved after it, an app killed while "Signing out…" was on screen had no marker, so the user reopened
+   signed in and the confirmed sign-out was lost (Q25). Now any kill after the view appears finishes the sign-out at
+   the next start, before `runApp`. Writes still pending are then dropped, which is what the user confirmed in the
+   warning (FR-052); without a warning there were none.
+
+   **If the marker cannot be saved** (the save throws, or returns `false`), the sign-out is cancelled completely:
+   `prepareSignOut` throws `AppException(type: ErrorType.cache, message: 'Could not start signing out. Please try
+   again.')`, `HomeBloc` shows it and never emits `isSigningOut`, `LogOut` is not called, the gate stays open, nothing
+   is wiped, and the user stays signed in. Without a saved marker, a kill could not be recovered, so no later step may
+   run.
+
+   If the app is killed after the marker is saved and before the view appears, the next start also finishes the
+   sign-out; the user had already chosen to leave.
 
    The marker is removed **after** `signOut()` (changed before B11): if the app is killed between the two, the next
    start wipes again, which is harmless, and finishes the sign-out. Removing it first could leave the user signed in
@@ -410,7 +427,7 @@ unchanged) and wipe it on sign-out with `terminate()` + `clearPersistence()`; wa
    | `signOut` fails, wipe OK or not (owner decision before B11) | kept | `wipePending` through `markSignOutIncomplete()`: **no wipe retry**, so no Firestore operation runs for the rest of this app run, even if a wipe could succeed | `ErrorType.auth`: "Could not finish signing out. Please restart the app to complete it." |
 
    In the last case the user is still signed in, so opening the gate would let them use Firestore after asking to
-   leave. A second Logout is **not allowed** in this app run: `logOut` and `hasPendingWrites` throw the same error
+   leave. A second Logout is **not allowed** in this app run: `prepareSignOut`, `logOut` and `hasPendingWrites` throw the same error
    without touching Firestore, the gate or the marker, and the next start finishes through step 4.
 
    The gate holds the reason, so refused operations show the message of that reason: the two errors above, with the
@@ -445,7 +462,7 @@ unchanged) and wipe it on sign-out with `terminate()` + `clearPersistence()`; wa
    failed wipe would see an empty screen without explanation. Blocs treat stream *done* as no-op.
    The helper became private (`_watchGuarded`) at T034, once `watchLatestMessages` used it; T057 uses it the same
    way from inside the datasource.
-6. **UI during sign-out**: `HomeBloc` emits `isSigningOut: true`; `HomeLogoutGate` (in `HomeLayout`) covers the app
+6. **UI during sign-out**: `HomeBloc` emits `isSigningOut: true` only after the marker is saved; `HomeLogoutGate` (in `HomeLayout`) covers the app
    with a blocking progress view, so no new user action starts Firestore work. It covers rather than replaces the
    tabs, so they keep their state if the sign-out fails and `profile_screen.dart` stays mounted for `isSuccess`. `HomeBloc` checks `isClosed` before emitting after
    the sign-out (the auth stream disposes `HomeLayout`).

@@ -44,6 +44,9 @@ class FakeHomeRepository implements HomeRepository {
   Future<bool> hasPendingWrites() async => false;
 
   @override
+  Future<void> prepareSignOut() async {}
+
+  @override
   Future<void> completePendingSignOut() async {}
 }
 

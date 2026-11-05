@@ -210,7 +210,7 @@ Modified files:
 | `test/widget_test.dart` | **Deleted** (default counter template; replaced by `test/core/errors/app_error_listener_test.dart`) |
 | `lib/main.dart` | After `init()`, before `runApp`: `await sl<CompletePendingSignOut>()()` (research D18 step 4) |
 | `lib/core/cache/cache_keys.dart` | `firestoreWipePending = 'firestore_wipe_pending'` |
-| `lib/features/home/data/datasource/home_remote_datasource.dart` | `hasPendingWrites()`, sign-out sequence (gate close → marker → `terminate` → `clearPersistence` → `signOut` → marker off → gate open), `completePendingSignOut()` (startup: wipes and signs out), `retryPendingWipe()` (the gate's retry: wipes only) |
+| `lib/features/home/data/datasource/home_remote_datasource.dart` | `hasPendingWrites()`, `prepareSignOut()` (saves the marker, before the "Signing out…" view), sign-out sequence (gate close → `terminate` → `clearPersistence` → `signOut` → marker off → gate open), `completePendingSignOut()` (startup: wipes and signs out), `retryPendingWipe()` (the gate's retry: wipes only) |
 | `lib/features/home/domain/repositories/home_repository.dart`, `data/repositories/home_repository_impl.dart` | `hasPendingWrites`, `completePendingSignOut` |
 | `lib/features/home/bloc/home_{bloc,event,state}.dart` | `LogoutPressed` → pending check; `LogoutConfirmed`, `LogoutCancelled`; `showUnsyncedWarning`, `isSigningOut`; `isClosed` guard |
 | `lib/features/home/ui/home_layout.dart` | Also: blocking "Signing out…" view while `isSigningOut`; unsynced-changes dialog (`BlocListener`) |
